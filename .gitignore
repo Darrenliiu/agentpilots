@@ -52,3 +52,6 @@ supabase/.temp/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# desktop release workflow requires GitHub workflow scope to push; keep local until token refreshed
+.github/workflows/
