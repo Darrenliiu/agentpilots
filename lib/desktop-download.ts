@@ -1,7 +1,11 @@
+import packageJson from "../package.json";
+
 const DEFAULT_GITHUB_REPO = "Darrenliiu/agentpilots";
 
 export function getDesktopVersionLabel() {
-  return process.env.NEXT_PUBLIC_DESKTOP_VERSION?.trim() || "0.1.2";
+  const fromEnv = process.env.NEXT_PUBLIC_DESKTOP_VERSION?.trim();
+  if (fromEnv) return fromEnv;
+  return typeof packageJson.version === "string" ? packageJson.version : "0.1.4";
 }
 
 function getGithubRepo() {

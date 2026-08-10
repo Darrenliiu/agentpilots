@@ -21,8 +21,8 @@
       "sizeBytes": 807694464,
       "minRamGb": 4,
       "license": "Llama 3.2 Community License",
-      "bundled": true,
-      "description": "Small Meta instruct model for local replies."
+      "bundled": false,
+      "description": "Small Meta instruct model for local replies. Download required (~0.8 GB)."
     },
     {
       "id": "qwen2.5-7b-instruct",
