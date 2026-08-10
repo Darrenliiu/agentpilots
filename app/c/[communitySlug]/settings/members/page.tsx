@@ -5,6 +5,7 @@ import {
   removeMemberAction,
   updateMemberRoleAction,
 } from "@/lib/actions";
+import { FREE_MAX_SEATS, isProPlan } from "@/lib/billing";
 import { createClient } from "@/lib/supabase/server";
 import type { CommunityRole } from "@/lib/types";
 
@@ -22,7 +23,7 @@ export default async function MembersSettingsPage({
 
   const { data: community } = await supabase
     .from("communities")
-    .select("id, slug")
+    .select("id, slug, plan")
     .eq("slug", communitySlug)
     .single();
   if (!community) notFound();
@@ -59,6 +60,10 @@ export default async function MembersSettingsPage({
     };
   });
 
+  const seatCount = memberRows.length;
+  const atFreeSeatCap =
+    !isProPlan(community.plan) && seatCount >= FREE_MAX_SEATS;
+
   return (
     <main className="mx-auto max-w-3xl p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -75,6 +80,19 @@ export default async function MembersSettingsPage({
           </Link>
         ) : null}
       </div>
+
+      {atFreeSeatCap ? (
+        <p className="mt-4 rounded-xl border px-4 py-3 text-sm">
+          Free communities are limited to {FREE_MAX_SEATS} members.{" "}
+          <Link
+            className="underline"
+            href={`/c/${community.slug}/settings/billing`}
+          >
+            Upgrade to Pro
+          </Link>{" "}
+          for more member seats.
+        </p>
+      ) : null}
 
       <div className="mt-6">
         <CommunityMembersPanel

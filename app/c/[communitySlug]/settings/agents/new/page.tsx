@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { AgentForm } from "@/components/agent-form";
 import { upsertAgentAction } from "@/lib/actions";
+import { FREE_MAX_AGENTS, isProPlan } from "@/lib/billing";
 import { createClient } from "@/lib/supabase/server";
 import type { Channel } from "@/lib/types";
 
@@ -36,6 +37,35 @@ export default async function NewAgentPage({
       <main className="p-8">
         <h1 className="brand text-3xl">Create New Agent</h1>
         <p className="muted mt-3">Only admins can manage agents.</p>
+      </main>
+    );
+  }
+
+  const { count: agentCount } = await supabase
+    .from("agents")
+    .select("*", { count: "exact", head: true })
+    .eq("community_id", community.id);
+
+  if (!isProPlan(community.plan) && (agentCount || 0) >= FREE_MAX_AGENTS) {
+    return (
+      <main className="mx-auto max-w-3xl space-y-6 p-8">
+        <h1 className="brand text-3xl">Create New Agent</h1>
+        <p className="mt-3 rounded-xl border px-4 py-3 text-sm">
+          Free communities are limited to {FREE_MAX_AGENTS} agents.{" "}
+          <Link
+            className="underline"
+            href={`/c/${community.slug}/settings/billing`}
+          >
+            Upgrade to Pro
+          </Link>{" "}
+          for unlimited agents.
+        </p>
+        <Link
+          className="btn secondary"
+          href={`/c/${community.slug}/settings/agents`}
+        >
+          ← Back to agents
+        </Link>
       </main>
     );
   }

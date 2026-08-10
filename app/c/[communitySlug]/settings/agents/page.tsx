@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { AgentsList } from "@/components/agents-list";
+import { FREE_MAX_AGENTS, isProPlan } from "@/lib/billing";
 import { createClient } from "@/lib/supabase/server";
 import type { Agent } from "@/lib/types";
 
@@ -93,6 +94,9 @@ export default async function AgentsSettingsPage({
     handoffTo: handoffToByAgent.get(agent.id) || [],
   }));
 
+  const atFreeAgentCap =
+    !isProPlan(community.plan) && items.length >= FREE_MAX_AGENTS;
+
   return (
     <main className="mx-auto max-w-3xl space-y-8 p-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -103,10 +107,35 @@ export default async function AgentsSettingsPage({
             prompt them. Use Link agents to set up hand offs between peers.
           </p>
         </div>
-        <Link className="btn shrink-0" href={`/c/${community.slug}/settings/agents/new`}>
-          Create New Agent
-        </Link>
+        {atFreeAgentCap ? (
+          <Link
+            className="btn secondary shrink-0"
+            href={`/c/${community.slug}/settings/billing`}
+          >
+            Upgrade for more agents
+          </Link>
+        ) : (
+          <Link
+            className="btn shrink-0"
+            href={`/c/${community.slug}/settings/agents/new`}
+          >
+            Create New Agent
+          </Link>
+        )}
       </div>
+
+      {atFreeAgentCap ? (
+        <p className="rounded-xl border px-4 py-3 text-sm">
+          Free communities are limited to {FREE_MAX_AGENTS} agents.{" "}
+          <Link
+            className="underline"
+            href={`/c/${community.slug}/settings/billing`}
+          >
+            Upgrade to Pro
+          </Link>{" "}
+          for unlimited agents.
+        </p>
+      ) : null}
 
       <AgentsList
         agents={items}

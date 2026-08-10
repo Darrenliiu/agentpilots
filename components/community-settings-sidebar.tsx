@@ -66,6 +66,16 @@ const COMMUNITY: NavItem[] = [
     ),
   },
   {
+    segment: "billing",
+    label: "Billing",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+        <rect x="3.5" y="6" width="17" height="12" rx="2" />
+        <path d="M3.5 10h17M8 14h3" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     segment: "channels",
     label: "Channels",
     icon: (

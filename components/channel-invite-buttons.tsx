@@ -18,6 +18,7 @@ import {
   addPeopleToChannelAction,
   getOrCreateCommunityShareLinkAction,
 } from "@/lib/actions";
+import { absoluteShareUrl } from "@/lib/site-url";
 import type { AgentKind, AgentStatus } from "@/lib/types";
 
 export type InviteAgentOption = {
@@ -135,14 +136,12 @@ export function ChannelInviteButtons({
 
   return (
     <>
-      <div className="flex items-center gap-1.5">
-        <IconButton label="Add agent" onClick={() => setDialog("agents")}>
-          <RobotIcon />
-        </IconButton>
-        <IconButton label="Add people" onClick={() => setDialog("people")}>
-          <PersonPlusIcon />
-        </IconButton>
-      </div>
+      <IconButton label="Add agent" onClick={() => setDialog("agents")}>
+        <RobotIcon />
+      </IconButton>
+      <IconButton label="Add people" onClick={() => setDialog("people")}>
+        <PersonPlusIcon />
+      </IconButton>
 
       <InvitePickerDialog
         open={dialog === "agents"}
@@ -249,7 +248,7 @@ function CommunityShareLink({ communityId }: { communityId: string }) {
           setError("Could not create invite link");
           return;
         }
-        url = `${window.location.origin}${res.path}`;
+        url = ("url" in res && res.url) || absoluteShareUrl(res.path);
         setLink(url);
       }
       if (thenCopy && url) {

@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { FREE_MAX_AVATAR_BYTES, formatBytesLimit } from "@/lib/billing";
 
-const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const ALLOWED_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -18,10 +18,14 @@ function extForMime(mime: string) {
 export async function uploadAvatarFile(
   path: string,
   file: File,
+  opts?: { maxBytes?: number },
 ): Promise<{ publicUrl?: string; error?: string }> {
   if (!file || file.size === 0) return {};
-  if (file.size > MAX_AVATAR_BYTES) {
-    return { error: "Avatar must be 2MB or smaller" };
+  const maxBytes = opts?.maxBytes ?? FREE_MAX_AVATAR_BYTES;
+  if (file.size > maxBytes) {
+    return {
+      error: `Avatar must be ${formatBytesLimit(maxBytes)} or smaller`,
+    };
   }
   if (!ALLOWED_TYPES.has(file.type)) {
     return { error: "Avatar must be PNG, JPG, WebP, or GIF" };

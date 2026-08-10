@@ -7,6 +7,7 @@ import {
   resolveAttachmentMime,
   validateAttachmentFile,
 } from "@/lib/message-attachments";
+import { maxAttachmentBytes } from "@/lib/billing";
 import type { Agent, CommunityConnector, Skill } from "@/lib/types";
 
 export type ComposerPendingFile = {
@@ -125,6 +126,7 @@ export function ComposerPlusMenu({
   skills,
   connectedConnectorIds,
   communitySlug,
+  communityPlan = "free",
   value,
   onChange,
 }: {
@@ -133,6 +135,7 @@ export function ComposerPlusMenu({
   skills: Skill[];
   connectedConnectorIds: string[];
   communitySlug: string;
+  communityPlan?: string;
   value: ComposerAttachment;
   onChange: (next: ComposerAttachment) => void;
 }) {
@@ -193,7 +196,10 @@ export function ComposerPlusMenu({
     }
     const nextFiles = [...value.files];
     for (const file of incoming.slice(0, room)) {
-      const validated = validateAttachmentFile(file);
+      const validated = validateAttachmentFile(
+        file,
+        maxAttachmentBytes(communityPlan),
+      );
       if (!validated.ok) {
         alert(validated.error);
         continue;

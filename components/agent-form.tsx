@@ -10,6 +10,37 @@ import {
 } from "@/lib/types";
 import type { LocalModelBridge } from "@/types/desktop";
 
+function CheckTile({
+  name,
+  value,
+  defaultChecked,
+  label,
+  meta,
+}: {
+  name: string;
+  value: string;
+  defaultChecked?: boolean;
+  label: string;
+  meta?: string;
+}) {
+  return (
+    <label className="check-tile">
+      <input
+        className="sr-only"
+        type="checkbox"
+        name={name}
+        value={value}
+        defaultChecked={defaultChecked}
+      />
+      <span className="check-tile__box" aria-hidden />
+      <span className="check-tile__label">
+        {label}
+        {meta ? <span className="check-tile__meta">{meta}</span> : null}
+      </span>
+    </label>
+  );
+}
+
 export function AgentForm({
   communityId,
   channels,
@@ -42,6 +73,7 @@ export function AgentForm({
   const [provider, setProvider] = useState(
     agent?.provider || (agent?.kind === "text" ? "local" : "openai"),
   );
+  const [status, setStatus] = useState(agent?.status || "active");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [localModels, setLocalModels] = useState<LocalModelBridge[]>([]);
@@ -55,12 +87,29 @@ export function AgentForm({
     agent?.handoff_max_depth == null,
   );
 
-  const providers = useMemo(
-    () => (kind === "text" ? TEXT_PROVIDERS : MEDIA_PROVIDERS),
-    [kind],
-  );
+  const providers = useMemo(() => {
+    if (kind === "text") return TEXT_PROVIDERS;
+    if (kind === "video") {
+      return MEDIA_PROVIDERS.filter((p) => p.id !== "google");
+    }
+    return MEDIA_PROVIDERS;
+  }, [kind]);
+
+  const modelPlaceholder = useMemo(() => {
+    if (kind === "video") {
+      if (provider === "higgsfield") return "higgsfield-ai/dop/standard";
+      return "sora-2";
+    }
+    if (kind === "image") {
+      if (provider === "google") return "gemini-2.0-flash-preview-image-generation";
+      if (provider === "higgsfield") return "gpt-image-2";
+      return "dall-e-3";
+    }
+    return "gpt-4o-mini";
+  }, [kind, provider]);
 
   const isLocal = kind === "text" && provider === "local";
+  const formId = agent?.id || "new";
 
   useEffect(() => {
     let cancelled = false;
@@ -91,7 +140,7 @@ export function AgentForm({
 
   return (
     <form
-      className="stack"
+      className="stack gap-4"
       action={(fd) => {
         start(async () => {
           const res = await action(communityId, fd);
@@ -101,131 +150,157 @@ export function AgentForm({
     >
       {agent ? <input type="hidden" name="id" value={agent.id} /> : null}
 
-      <div className="flex items-center gap-4">
-        <Avatar src={avatarPreview} name={agent?.name || "New agent"} size={56} />
-        <div className="min-w-0 flex-1">
-          <label className="label" htmlFor={`avatar-${agent?.id || "new"}`}>
-            Avatar
-          </label>
-          <input
-            className="field"
-            id={`avatar-${agent?.id || "new"}`}
-            name="avatar"
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              setAvatarPreview(URL.createObjectURL(file));
-            }}
-          />
-          <p className="muted mt-1 text-xs">
-            Optional · PNG, JPG, WebP, or GIF · max 2MB
-          </p>
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <div>
-          <label className="label" htmlFor={`name-${agent?.id || "new"}`}>
-            Name
-          </label>
-          <input
-            className="field"
-            id={`name-${agent?.id || "new"}`}
-            name="name"
-            required
-            defaultValue={agent?.name}
-            placeholder="ResearchBot"
-          />
-        </div>
-        <div>
-          <label className="label" htmlFor={`kind-${agent?.id || "new"}`}>
-            Kind
-          </label>
-          <select
-            className="field"
-            id={`kind-${agent?.id || "new"}`}
-            name="kind"
-            value={kind}
-            onChange={(e) => {
-              const next = e.target.value as Agent["kind"];
-              setKind(next);
-              if (next !== "text" && provider === "local") setProvider("openai");
-              if (next === "text" && !agent) setProvider("local");
-            }}
-          >
-            <option value="text">Text LLM</option>
-            <option value="image">Image gen</option>
-            <option value="video">Video gen</option>
-          </select>
-        </div>
-        <div>
-          <label className="label" htmlFor={`provider-${agent?.id || "new"}`}>
-            Provider
-          </label>
-          <select
-            className="field"
-            id={`provider-${agent?.id || "new"}`}
-            name="provider"
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-          >
-            {providers.map((p) => (
-              <option
-                key={p.id}
-                value={p.id}
-                disabled={"disabled" in p ? Boolean(p.disabled) : false}
-              >
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label" htmlFor={`model-${agent?.id || "new"}`}>
-            Model
-          </label>
-          {isLocal ? (
-            <select
-              className="field"
-              id={`model-${agent?.id || "new"}`}
-              name="model"
-              defaultValue={agent?.model || localModels[0]?.id || "qwen2.5-1.5b-instruct"}
-              required
-            >
-              {localModels.length === 0 ? (
-                <option value="qwen2.5-1.5b-instruct">
-                  qwen2.5-1.5b-instruct (install via Local models)
-                </option>
-              ) : (
-                localModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                    {m.active ? " (active runtime)" : ""}
-                  </option>
-                ))
-              )}
-            </select>
-          ) : (
+      <div className="form-section">
+        <div className="flex items-center gap-4">
+          <Avatar src={avatarPreview} name={agent?.name || "New agent"} size={56} />
+          <div className="min-w-0 flex-1">
+            <label className="label" htmlFor={`avatar-${formId}`}>
+              Avatar
+            </label>
             <input
               className="field"
-              id={`model-${agent?.id || "new"}`}
-              name="model"
-              defaultValue={agent?.model}
-              placeholder="gpt-4o-mini"
+              id={`avatar-${formId}`}
+              name="avatar"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setAvatarPreview(URL.createObjectURL(file));
+              }}
             />
-          )}
+            <p className="muted mt-1 text-xs">
+              Optional · PNG, JPG, WebP, or GIF · max 2MB
+            </p>
+          </div>
         </div>
       </div>
 
-      <div>
-        <label className="label" htmlFor={`prompt-${agent?.id || "new"}`}>
+      <div className="form-section">
+        <span className="form-section__legend">Identity</span>
+        <p className="form-section__hint">
+          Name the agent and choose how it generates replies.
+        </p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <label className="label" htmlFor={`name-${formId}`}>
+              Name
+            </label>
+            <input
+              className="field"
+              id={`name-${formId}`}
+              name="name"
+              required
+              defaultValue={agent?.name}
+              placeholder="ResearchBot"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <span className="label">Kind</span>
+            <div className="segmented" role="radiogroup" aria-label="Agent kind">
+              {(
+                [
+                  { value: "text", label: "Text LLM" },
+                  { value: "image", label: "Image gen" },
+                  { value: "video", label: "Video gen" },
+                ] as const
+              ).map((opt) => (
+                <label key={opt.value} className="segmented__option">
+                  <input
+                    className="sr-only"
+                    type="radio"
+                    name="kind"
+                    value={opt.value}
+                    checked={kind === opt.value}
+                    onChange={() => {
+                      const next = opt.value;
+                      setKind(next);
+                      if (next !== "text" && provider === "local") {
+                        setProvider("openai");
+                      }
+                      if (next === "video" && provider === "google") {
+                        setProvider("openai");
+                      }
+                      if (next === "text" && !agent) setProvider("local");
+                    }}
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="label" htmlFor={`provider-${formId}`}>
+              Provider
+            </label>
+            <select
+              className="field"
+              id={`provider-${formId}`}
+              name="provider"
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+            >
+              {providers.map((p) => (
+                <option
+                  key={p.id}
+                  value={p.id}
+                  disabled={"disabled" in p ? Boolean(p.disabled) : false}
+                >
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label" htmlFor={`model-${formId}`}>
+              Model
+            </label>
+            {isLocal ? (
+              <select
+                className="field"
+                id={`model-${formId}`}
+                name="model"
+                defaultValue={
+                  agent?.model || localModels[0]?.id || "qwen2.5-1.5b-instruct"
+                }
+                required
+              >
+                {localModels.length === 0 ? (
+                  <option value="qwen2.5-1.5b-instruct">
+                    qwen2.5-1.5b-instruct (install via Local models)
+                  </option>
+                ) : (
+                  localModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                      {m.active ? " (active runtime)" : ""}
+                    </option>
+                  ))
+                )}
+              </select>
+            ) : (
+              <input
+                className="field"
+                id={`model-${formId}`}
+                name="model"
+                defaultValue={agent?.model}
+                placeholder={modelPlaceholder}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="form-section">
+        <label className="form-section__legend" htmlFor={`prompt-${formId}`}>
           System prompt
         </label>
+        <p className="form-section__hint">
+          Instructions that shape this agent&apos;s tone and behavior.
+        </p>
         <textarea
           className="field min-h-[90px]"
-          id={`prompt-${agent?.id || "new"}`}
+          id={`prompt-${formId}`}
           name="system_prompt"
           defaultValue={agent?.system_prompt}
           placeholder="You are a helpful research agent for this community."
@@ -233,136 +308,163 @@ export function AgentForm({
       </div>
 
       {!isLocal ? (
-        <div className="grid gap-3 md:grid-cols-2">
-          <div>
-            <label className="label" htmlFor={`key-${agent?.id || "new"}`}>
-              API key {agent ? "(leave blank to keep existing)" : ""}
-            </label>
-            <input
-              className="field"
-              id={`key-${agent?.id || "new"}`}
-              name="api_key"
-              type="password"
-              autoComplete="off"
-              required={!agent}
-              placeholder="sk-..."
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor={`base-${agent?.id || "new"}`}>
-              Base URL (OpenAI-compatible / Cursor gateway)
-            </label>
-            <input
-              className="field"
-              id={`base-${agent?.id || "new"}`}
-              name="base_url"
-              placeholder="https://api.example.com/v1"
-            />
+        <div className="form-section">
+          <span className="form-section__legend">Credentials</span>
+          <p className="form-section__hint">
+            API access for the selected cloud provider.
+          </p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="label" htmlFor={`key-${formId}`}>
+                API key {agent ? "(leave blank to keep existing)" : ""}
+              </label>
+              <input
+                className="field"
+                id={`key-${formId}`}
+                name="api_key"
+                type="password"
+                autoComplete="off"
+                required={!agent}
+                placeholder="sk-..."
+              />
+            </div>
+            <div>
+              <label className="label" htmlFor={`base-${formId}`}>
+                Base URL (OpenAI-compatible / Cursor gateway)
+              </label>
+              <input
+                className="field"
+                id={`base-${formId}`}
+                name="base_url"
+                placeholder="https://api.example.com/v1"
+              />
+            </div>
           </div>
         </div>
       ) : (
-        <p className="muted text-sm">
+        <p className="muted rounded-xl border px-3.5 py-3 text-sm" style={{ borderColor: "var(--line)", background: "var(--field-bg)" }}>
           Local agents use the on-device llama.cpp runtime. Manage downloads and
           the active GGUF under Local models.
         </p>
       )}
 
-      <div>
-        <label className="label" htmlFor={`status-${agent?.id || "new"}`}>
-          Status
-        </label>
-        <select
-          className="field"
-          id={`status-${agent?.id || "new"}`}
-          name="status"
-          defaultValue={agent?.status || "active"}
-        >
-          <option value="active">Active</option>
-          <option value="disabled">Disabled</option>
-        </select>
-      </div>
-
-      <fieldset>
-        <legend className="label">Channels this agent can join</legend>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {channels.map((ch) => (
-            <label key={ch.id} className="flex items-center gap-2 text-sm">
+      <div className="form-section">
+        <span className="form-section__legend">Status</span>
+        <p className="form-section__hint">
+          Disabled agents stay configured but won&apos;t respond.
+        </p>
+        <div className="segmented max-w-sm" role="radiogroup" aria-label="Agent status">
+          {(
+            [
+              { value: "active", label: "Active" },
+              { value: "disabled", label: "Disabled" },
+            ] as const
+          ).map((opt) => (
+            <label key={opt.value} className="segmented__option">
               <input
-                type="checkbox"
-                name="channel_ids"
-                value={ch.id}
-                defaultChecked={selectedChannelIds.includes(ch.id)}
+                className="sr-only"
+                type="radio"
+                name="status"
+                value={opt.value}
+                checked={status === opt.value}
+                onChange={() => setStatus(opt.value)}
               />
-              #{ch.name}
+              {opt.label}
             </label>
           ))}
         </div>
+      </div>
+
+      <fieldset className="form-section">
+        <legend className="form-section__legend">Channels this agent can join</legend>
+        <p className="form-section__hint">
+          Pick the spaces where this agent is allowed to participate.
+        </p>
+        {channels.length === 0 ? (
+          <p className="muted text-sm">No channels yet.</p>
+        ) : (
+          <div className="check-grid">
+            {channels.map((ch) => (
+              <CheckTile
+                key={ch.id}
+                name="channel_ids"
+                value={ch.id}
+                defaultChecked={selectedChannelIds.includes(ch.id)}
+                label={`#${ch.name}`}
+              />
+            ))}
+          </div>
+        )}
       </fieldset>
 
       {connectors.length > 0 ? (
-        <fieldset>
-          <legend className="label">Default connectors</legend>
-          <p className="muted mb-2 text-xs">
+        <fieldset className="form-section">
+          <legend className="form-section__legend">Default connectors</legend>
+          <p className="form-section__hint">
             Used when the chat message does not attach connectors via +.
           </p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="check-grid">
             {connectors
               .filter((c) => c.enabled)
               .map((c) => (
-                <label key={c.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="connector_ids"
-                    value={c.id}
-                    defaultChecked={selectedConnectorIds.includes(c.id)}
-                  />
-                  {c.name}
-                </label>
+                <CheckTile
+                  key={c.id}
+                  name="connector_ids"
+                  value={c.id}
+                  defaultChecked={selectedConnectorIds.includes(c.id)}
+                  label={c.name}
+                />
               ))}
           </div>
         </fieldset>
       ) : null}
 
       {skills.length > 0 ? (
-        <fieldset>
-          <legend className="label">Default skills</legend>
-          <p className="muted mb-2 text-xs">
+        <fieldset className="form-section">
+          <legend className="form-section__legend">Default skills</legend>
+          <p className="form-section__hint">
             Used when the chat message does not attach skills via +.
           </p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="check-grid">
             {skills
               .filter((s) => s.enabled)
               .map((s) => (
-                <label key={s.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    name="skill_ids"
-                    value={s.id}
-                    defaultChecked={selectedSkillIds.includes(s.id)}
-                  />
-                  {s.name}
-                </label>
+                <CheckTile
+                  key={s.id}
+                  name="skill_ids"
+                  value={s.id}
+                  defaultChecked={selectedSkillIds.includes(s.id)}
+                  label={s.name}
+                />
               ))}
           </div>
         </fieldset>
       ) : null}
 
       {kind === "text" ? (
-        <fieldset>
-          <legend className="label">Hand Off</legend>
-          <p className="muted mb-3 text-xs">
+        <fieldset className="form-section">
+          <legend className="form-section__legend">Hand Off</legend>
+          <p className="form-section__hint">
             Let this agent tag another agent with @Name so they can continue the
             work in-channel.
           </p>
-          <label className="flex items-center gap-2 text-sm">
+
+          <label className="switch-row">
+            <span className="switch-row__copy">
+              <span className="switch-row__title">Enable hand off</span>
+              <span className="switch-row__hint">
+                Allow this agent to pass work to selected peers.
+              </span>
+            </span>
             <input
+              className="sr-only"
               type="checkbox"
               name="handoff_enabled"
               value="true"
               checked={handoffEnabled}
               onChange={(e) => setHandoffEnabled(e.target.checked)}
             />
-            Enable hand off
+            <span className="switch" aria-hidden />
           </label>
 
           {handoffEnabled ? (
@@ -374,83 +476,107 @@ export function AgentForm({
                     Create another agent in this community to allow hand offs.
                   </p>
                 ) : (
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="check-grid">
                     {peerAgents.map((peer) => (
-                      <label
+                      <CheckTile
                         key={peer.id}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <input
-                          type="checkbox"
-                          name="handoff_target_ids"
-                          value={peer.id}
-                          defaultChecked={selectedHandoffTargetIds.includes(
-                            peer.id,
-                          )}
-                        />
-                        {peer.name}
-                        {peer.status !== "active" ? (
-                          <span className="muted text-xs">(disabled)</span>
-                        ) : null}
-                      </label>
+                        name="handoff_target_ids"
+                        value={peer.id}
+                        defaultChecked={selectedHandoffTargetIds.includes(
+                          peer.id,
+                        )}
+                        label={peer.name}
+                        meta={
+                          peer.status !== "active" ? "Disabled" : undefined
+                        }
+                      />
                     ))}
                   </div>
                 )}
               </div>
 
-              <details className="rounded-lg border px-3 py-2" style={{ borderColor: "var(--line)" }}>
-                <summary className="cursor-pointer text-sm font-medium">
-                  Advanced
-                </summary>
-                <div className="mt-3 space-y-3">
-                  <label className="flex items-center gap-2 text-sm">
+              <details className="form-details">
+                <summary>Advanced</summary>
+                <div className="form-details__body mt-3 space-y-3">
+                  <label className="switch-row">
+                    <span className="switch-row__copy">
+                      <span className="switch-row__title">
+                        Unlimited chain depth
+                      </span>
+                      <span className="switch-row__hint">
+                        Allow any number of agent→agent hops.
+                      </span>
+                    </span>
                     <input
+                      className="sr-only"
                       type="checkbox"
                       name="handoff_unlimited"
                       value="true"
                       checked={handoffUnlimited}
                       onChange={(e) => setHandoffUnlimited(e.target.checked)}
                     />
-                    Unlimited chain depth
+                    <span className="switch" aria-hidden />
                   </label>
+
                   {!handoffUnlimited ? (
                     <div>
                       <label
                         className="label"
-                        htmlFor={`handoff-depth-${agent?.id || "new"}`}
+                        htmlFor={`handoff-depth-${formId}`}
                       >
                         Max chain depth
                       </label>
                       <input
                         className="field"
-                        id={`handoff-depth-${agent?.id || "new"}`}
+                        id={`handoff-depth-${formId}`}
                         name="handoff_max_depth"
                         type="number"
                         min={1}
                         defaultValue={agent?.handoff_max_depth ?? 3}
                       />
                       <p className="muted mt-1 text-xs">
-                        Number of agent→agent hops allowed after a human message.
+                        Number of agent→agent hops allowed after a human
+                        message.
                       </p>
                     </div>
                   ) : null}
-                  <label className="flex items-center gap-2 text-sm">
+
+                  <label className="switch-row">
+                    <span className="switch-row__copy">
+                      <span className="switch-row__title">
+                        Block cycles
+                      </span>
+                      <span className="switch-row__hint">
+                        Same agent cannot appear more than once in a chain.
+                      </span>
+                    </span>
                     <input
+                      className="sr-only"
                       type="checkbox"
                       name="handoff_block_cycles"
                       value="true"
                       defaultChecked={agent?.handoff_block_cycles !== false}
                     />
-                    Block cycles (same agent more than once in a chain)
+                    <span className="switch" aria-hidden />
                   </label>
-                  <label className="flex items-center gap-2 text-sm">
+
+                  <label className="switch-row">
+                    <span className="switch-row__copy">
+                      <span className="switch-row__title">
+                        Prompt assist
+                      </span>
+                      <span className="switch-row__hint">
+                        Auto-add hand off instructions to the system prompt.
+                      </span>
+                    </span>
                     <input
+                      className="sr-only"
                       type="checkbox"
                       name="handoff_prompt_assist"
                       value="true"
                       defaultChecked={agent?.handoff_prompt_assist !== false}
                     />
-                    Auto-add hand off instructions to the system prompt
+                    <span className="switch" aria-hidden />
                   </label>
                 </div>
               </details>
@@ -465,7 +591,7 @@ export function AgentForm({
         </p>
       ) : null}
 
-      <button className="btn" disabled={pending} type="submit">
+      <button className="btn w-full" disabled={pending} type="submit">
         {pending ? "Saving…" : agent ? "Update agent" : "Create agent"}
       </button>
     </form>

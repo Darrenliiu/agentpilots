@@ -24,7 +24,7 @@ export function AgentActivityBar({
 
   return (
     <div
-      className="agent-activity-bar mt-2 flex min-w-0 items-center gap-2 px-0.5"
+      className="agent-activity-bar mb-2 flex min-w-0 items-center gap-2 px-0.5"
       role="status"
       aria-live="polite"
     >

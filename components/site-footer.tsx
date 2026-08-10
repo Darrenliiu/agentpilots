@@ -2,6 +2,7 @@ import Link from "next/link";
 
 const productLinks = [
   { href: "/download", label: "Download" },
+  { href: "/pricing", label: "Pricing" },
   { href: "/discover", label: "Discover" },
   { href: "/join", label: "Join with invite" },
 ];

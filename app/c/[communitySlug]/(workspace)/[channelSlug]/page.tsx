@@ -13,10 +13,13 @@ import type {
 
 export default async function ChannelPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ communitySlug: string; channelSlug: string }>;
+  searchParams: Promise<{ m?: string }>;
 }) {
   const { communitySlug, channelSlug } = await params;
+  const { m: highlightMessageId } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -25,7 +28,7 @@ export default async function ChannelPage({
 
   const { data: community } = await supabase
     .from("communities")
-    .select("id, slug")
+    .select("id, slug, plan")
     .eq("slug", communitySlug)
     .single();
   if (!community) notFound();
@@ -175,6 +178,7 @@ export default async function ChannelPage({
       channelType={channel.type}
       communityId={community.id}
       communitySlug={community.slug}
+      communityPlan={community.plan ?? "free"}
       initialMessages={initialMessages}
       initialReactions={initialReactions}
       agents={agents}
@@ -186,6 +190,7 @@ export default async function ChannelPage({
       connectors={(connectors || []) as CommunityConnector[]}
       skills={(skills || []) as Skill[]}
       connectedConnectorIds={connectedConnectorIds}
+      highlightMessageId={highlightMessageId || null}
     />
   );
 }

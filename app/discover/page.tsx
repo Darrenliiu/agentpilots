@@ -108,7 +108,10 @@ export default async function DiscoverPage() {
             Browse communities. Join public ones, or get an invite for private.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+          <Link className="btn secondary" href="/pricing">
+            Pricing
+          </Link>
           <Link className="btn secondary" href="/download">
             Download
           </Link>

@@ -1,6 +1,6 @@
 {
   "name": "agentpilots",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Multiplayer communities with people and AI agents in the same channels",
   "author": "AgentPilots",
@@ -38,6 +38,8 @@
     "rehype-sanitize": "^6.0.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "server-only": "^0.0.1",
+    "stripe": "^22.4.0",
     "uuid": "^14.0.1",
     "zod": "^4.4.3"
   },

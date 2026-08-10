@@ -3,6 +3,7 @@
 import { useEffect, useId, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { getOrCreateCommunityShareLinkAction } from "@/lib/actions";
+import { absoluteShareUrl } from "@/lib/site-url";
 import {
   SidebarPlusButton,
   SidebarSectionHeader,
@@ -104,7 +105,7 @@ function InviteMembersDialog({
         setError("Could not create invite link");
         return;
       }
-      setLink(`${window.location.origin}${res.path}`);
+      setLink(("url" in res && res.url) || absoluteShareUrl(res.path));
     });
   }, [open, communityId, link]);
 

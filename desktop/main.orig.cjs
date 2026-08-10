@@ -86,6 +86,8 @@ async function startNextServer() {
     LOCAL_LLM_BASE_URL: `http://${LOCAL_LLM_HOST}:${LOCAL_LLM_PORT}/v1`,
     LOCAL_LLM_STATUS_PATH: modelManager?.statusPath || "",
     AGENTPILOTS_DESKTOP: "1",
+    NEXT_PUBLIC_SITE_URL:
+      process.env.NEXT_PUBLIC_SITE_URL || "https://agentpilots.ai",
   };
 
   if (isDev) {

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentActivityBar } from "@/components/agent-activity-bar";
 import { Avatar } from "@/components/avatar";
 import { ChannelInviteButtons } from "@/components/channel-invite-buttons";
+import { ChannelSettingsButton } from "@/components/channel-settings-button";
 import {
   ComposerChips,
   ComposerPlusMenu,
@@ -22,6 +23,7 @@ import {
   MessageBody,
   type MentionTarget,
 } from "@/components/message-body";
+import { MessageMedia } from "@/components/message-media";
 import {
   ProfileHoverCard,
   type ProfileHoverInfo,
@@ -375,6 +377,7 @@ export function ChatRoom({
   channelType = "public",
   communityId,
   communitySlug,
+  communityPlan = "free",
   initialMessages,
   initialReactions = [],
   agents,
@@ -386,12 +389,14 @@ export function ChatRoom({
   connectors = [],
   skills = [],
   connectedConnectorIds = [],
+  highlightMessageId = null,
 }: {
   channelId: string;
   channelName: string;
   channelType?: "public" | "private" | "dm";
   communityId: string;
   communitySlug: string;
+  communityPlan?: string;
   initialMessages: RichMessage[];
   initialReactions?: MessageReaction[];
   agents: Agent[];
@@ -409,6 +414,7 @@ export function ChatRoom({
   connectors?: CommunityConnector[];
   skills?: Skill[];
   connectedConnectorIds?: string[];
+  highlightMessageId?: string | null;
 }) {
   const { runs: activeRuns, now: activityNow } = useAgentActivity({
     communityId,
@@ -416,6 +422,9 @@ export function ChatRoom({
   });
 
   const isDm = channelType === "dm";
+  const myRole = members.find((m) => m.id === currentUserId)?.role;
+  const canManageChannels =
+    !isDm && (myRole === "owner" || myRole === "admin");
   const dmAgent = isDm && agents.length > 0 ? agents[0] : null;
   const dmMember =
     isDm && !dmAgent
@@ -626,7 +635,16 @@ export function ChatRoom({
   function scrollToMessage(id: string) {
     const el = messageRefs.current.get(id);
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    el?.classList.add("message-row--flash");
+    window.setTimeout(() => el?.classList.remove("message-row--flash"), 1600);
   }
+
+  useEffect(() => {
+    if (!highlightMessageId) return;
+    const t = window.setTimeout(() => scrollToMessage(highlightMessageId), 120);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount / id change
+  }, [highlightMessageId]);
 
   async function toggleReaction(messageId: string, emoji: string) {
     const existing = reactions.find(
@@ -729,6 +747,7 @@ export function ChatRoom({
         communityId,
         channelId,
         files: pendingFiles,
+        plan: communityPlan,
       });
       if (result.error) {
         setSending(false);
@@ -833,16 +852,26 @@ export function ChatRoom({
                   {agents.length} {agents.length === 1 ? "agent" : "agents"}
                 </span>
               </div>
-              <ChannelInviteButtons
-                channelId={channelId}
-                communityId={communityId}
-                communitySlug={communitySlug}
-                communityAgents={communityAgents}
-                linkedAgentIds={agents.map((a) => a.id)}
-                members={members}
-                channelMemberIds={channelMemberIds}
-                currentUserId={currentUserId}
-              />
+              <div className="flex items-center gap-1.5">
+                <ChannelInviteButtons
+                  channelId={channelId}
+                  communityId={communityId}
+                  communitySlug={communitySlug}
+                  communityAgents={communityAgents}
+                  linkedAgentIds={agents.map((a) => a.id)}
+                  members={members}
+                  channelMemberIds={channelMemberIds}
+                  currentUserId={currentUserId}
+                />
+                {canManageChannels &&
+                (channelType === "public" || channelType === "private") ? (
+                  <ChannelSettingsButton
+                    channelId={channelId}
+                    channelName={channelName}
+                    channelType={channelType}
+                  />
+                ) : null}
+              </div>
             </>
           ) : null}
         </div>
@@ -855,6 +884,16 @@ export function ChatRoom({
           const avatarUrl = m.agent?.avatar_url || m.author?.avatar_url || null;
           const mediaUrl =
             typeof m.metadata?.media_url === "string" ? m.metadata.media_url : null;
+          const mediaMime =
+            typeof m.metadata?.media_mime === "string"
+              ? m.metadata.media_mime
+              : null;
+          const mediaKind =
+            typeof m.metadata?.media_kind === "string"
+              ? m.metadata.media_kind
+              : typeof m.metadata?.kind === "string"
+                ? m.metadata.kind
+                : null;
           const messageAttachments = parseMessageAttachments(m.metadata);
           const handoff = parseHandoffMetadata(m.metadata);
           const tokenUsage = isAgent ? parseTokenUsage(m.metadata) : null;
@@ -1001,12 +1040,15 @@ export function ChatRoom({
                   />
                 ) : null}
                 {mediaUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={mediaUrl}
-                    alt="Generated media"
-                    className="mt-3 max-h-80 rounded-xl border"
-                    style={{ borderColor: "var(--line)" }}
+                  <MessageMedia
+                    url={mediaUrl}
+                    mime={mediaMime}
+                    kind={mediaKind}
+                    alt={
+                      typeof m.metadata?.prompt === "string" && m.metadata.prompt
+                        ? m.metadata.prompt
+                        : "Generated media"
+                    }
                   />
                 ) : null}
                 <MessageReactionChips
@@ -1080,6 +1122,7 @@ export function ChatRoom({
           value={attachments}
           onChange={setAttachments}
         />
+        <AgentActivityBar runs={activeRuns} now={activityNow} />
         <div className="composer-shell">
           <textarea
             ref={composerRef}
@@ -1111,6 +1154,7 @@ export function ChatRoom({
               skills={skills}
               connectedConnectorIds={connectedConnectorIds}
               communitySlug={communitySlug}
+              communityPlan={communityPlan}
               value={attachments}
               onChange={setAttachments}
             />
@@ -1148,7 +1192,6 @@ export function ChatRoom({
             </div>
           </div>
         </div>
-        <AgentActivityBar runs={activeRuns} now={activityNow} />
         {speechError && speechSupported ? (
           <p className="muted mt-2 text-xs" role="status">
             {speechError}

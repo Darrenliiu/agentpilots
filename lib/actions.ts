@@ -19,18 +19,16 @@ import {
   rememberMeCookieOptions,
 } from "@/lib/supabase/remember-me";
 import { safeRedirectPath } from "@/lib/safe-redirect";
+import {
+  FREE_MAX_AGENTS,
+  isProPlan,
+  maxAvatarBytes,
+} from "@/lib/billing";
+import { syncCommunitySeatQuantity } from "@/lib/billing-stripe";
+import { siteOrigin } from "@/lib/site-url";
 
-function siteOrigin() {
-  if (process.env.NEXT_PUBLIC_SITE_URL) {
-    return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
-  }
-  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
-  }
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-  return "http://localhost:3000";
+function absoluteJoinUrl(token: string) {
+  return `${siteOrigin()}/join/${token}` as const;
 }
 
 async function setRememberMePreference(remember: boolean) {
@@ -214,12 +212,19 @@ export async function updateCommunitySettingsAction(formData: FormData) {
     .single();
   if (!community) return { error: "Community not found" };
 
+  const { data: billingRow } = await supabase
+    .from("communities")
+    .select("plan")
+    .eq("id", communityId)
+    .single();
+
   let avatarUrl: string | undefined;
   const avatar = formData.get("avatar");
   if (avatar instanceof File && avatar.size > 0) {
     const uploaded = await uploadAvatarFile(
       communityAvatarPath(communityId, avatar.type),
       avatar,
+      { maxBytes: maxAvatarBytes(billingRow?.plan) },
     );
     if (uploaded.error) return { error: uploaded.error };
     avatarUrl = uploaded.publicUrl;
@@ -363,6 +368,12 @@ export async function removeMemberAction(formData: FormData) {
 
   if (error) return { error: error.message };
 
+  try {
+    await syncCommunitySeatQuantity(communityId);
+  } catch (err) {
+    console.error("[billing] seat sync after remove", err);
+  }
+
   if (isSelf) redirect("/home");
 
   const { data: community } = await supabase
@@ -384,6 +395,12 @@ export async function acceptInviteAction(token: string) {
     p_token: token,
   });
   if (error) return { error: error.message };
+
+  try {
+    await syncCommunitySeatQuantity(String(communityId));
+  } catch (err) {
+    console.error("[billing] seat sync after invite", err);
+  }
 
   const { data: community } = await supabase
     .from("communities")
@@ -407,6 +424,12 @@ export async function joinPublicCommunityAction(communityId: string) {
     p_community_id: communityId,
   });
   if (error) return { error: error.message };
+
+  try {
+    await syncCommunitySeatQuantity(String(joinedId));
+  } catch (err) {
+    console.error("[billing] seat sync after join", err);
+  }
 
   const { data: community } = await supabase
     .from("communities")
@@ -496,6 +519,12 @@ async function joinCommunityBySlug(slug: string) {
     p_community_id: community.id,
   });
   if (error) return { error: error.message };
+
+  try {
+    await syncCommunitySeatQuantity(community.id);
+  } catch (err) {
+    console.error("[billing] seat sync after join by slug", err);
+  }
 
   revalidatePath(`/c/${community.slug}`, "layout");
   redirect(`/c/${community.slug}`);
@@ -622,6 +651,7 @@ export async function getOrCreateCommunityShareLinkAction(communityId: string) {
   if (existing?.token) {
     return {
       path: `/join/${existing.token}` as const,
+      url: absoluteJoinUrl(existing.token),
       inviteId: existing.id as string,
       expiresAt: (existing.expires_at as string | null) ?? null,
     };
@@ -643,6 +673,7 @@ export async function getOrCreateCommunityShareLinkAction(communityId: string) {
   if (error) return { error: error.message };
   return {
     path: `/join/${data.token}` as const,
+    url: absoluteJoinUrl(data.token),
     inviteId: data.id as string,
     expiresAt: (data.expires_at as string | null) ?? null,
   };
@@ -675,6 +706,7 @@ export async function updateCommunityShareLinkExpiryAction(
 
   return {
     path: link.path,
+    url: link.url,
     inviteId: link.inviteId,
     expiresAt,
   };
@@ -725,8 +757,55 @@ export async function regenerateCommunityShareLinkAction(
 
   return {
     path: `/join/${data.token}` as const,
+    url: absoluteJoinUrl(data.token),
     inviteId: data.id as string,
     expiresAt: (data.expires_at as string | null) ?? null,
+  };
+}
+
+function slugifyChannelName(name: string) {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "channel"
+  );
+}
+
+async function assertChannelAdminAccess(channelId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" as const };
+
+  const { data: channel } = await supabase
+    .from("channels")
+    .select("id, community_id, name, slug, type, communities(slug)")
+    .eq("id", channelId)
+    .maybeSingle();
+  if (!channel) return { error: "Channel not found" as const };
+  if (channel.type === "dm") {
+    return { error: "Direct messages cannot be edited here" as const };
+  }
+
+  const { data: membership } = await supabase
+    .from("community_members")
+    .select("role")
+    .eq("community_id", channel.community_id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!membership) return { error: "Not a community member" as const };
+  if (!["owner", "admin"].includes(membership.role)) {
+    return { error: "Only admins can manage channels" as const };
+  }
+
+  const community = channel.communities as unknown as { slug: string } | null;
+  return {
+    user,
+    channel,
+    communitySlug: community?.slug || null,
+    supabase,
   };
 }
 
@@ -740,17 +819,14 @@ export async function createChannelAction(communityId: string, formData: FormDat
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
-  const slug = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
+  const slug = slugifyChannelName(name);
 
   const { data: channel, error } = await supabase
     .from("channels")
     .insert({
       community_id: communityId,
       name,
-      slug: slug || "channel",
+      slug,
       type,
       created_by: user.id,
     })
@@ -770,6 +846,94 @@ export async function createChannelAction(communityId: string, formData: FormDat
     .single();
   revalidatePath(`/c/${community?.slug}`, "layout");
   redirect(`/c/${community?.slug}/${channel.slug}`);
+}
+
+export async function updateChannelAction(input: {
+  channelId: string;
+  name: string;
+  type: "public" | "private";
+}) {
+  const name = input.name.trim();
+  if (!name) return { error: "Name is required" };
+  if (input.type !== "public" && input.type !== "private") {
+    return { error: "Type must be public or private" };
+  }
+
+  const access = await assertChannelAdminAccess(input.channelId);
+  if ("error" in access) return { error: access.error };
+
+  const { channel, communitySlug, supabase } = access;
+  const slug = slugifyChannelName(name);
+
+  if (slug !== channel.slug) {
+    const { data: clash } = await supabase
+      .from("channels")
+      .select("id")
+      .eq("community_id", channel.community_id)
+      .eq("slug", slug)
+      .neq("id", channel.id)
+      .maybeSingle();
+    if (clash) return { error: "A channel with that name already exists" };
+  }
+
+  const { error } = await supabase
+    .from("channels")
+    .update({ name, slug, type: input.type })
+    .eq("id", channel.id);
+  if (error) return { error: error.message };
+
+  if (input.type === "private") {
+    await supabase.from("channel_members").upsert(
+      { channel_id: channel.id, user_id: access.user.id },
+      { onConflict: "channel_id,user_id", ignoreDuplicates: true },
+    );
+  }
+
+  if (communitySlug) {
+    revalidatePath(`/c/${communitySlug}`, "layout");
+    if (slug !== channel.slug) {
+      redirect(`/c/${communitySlug}/${slug}`);
+    }
+  }
+
+  return { ok: true as const, slug };
+}
+
+export async function deleteChannelAction(channelId: string) {
+  const access = await assertChannelAdminAccess(channelId);
+  if ("error" in access) return { error: access.error };
+
+  const { channel, communitySlug, supabase } = access;
+
+  const { count, error: countError } = await supabase
+    .from("channels")
+    .select("id", { count: "exact", head: true })
+    .eq("community_id", channel.community_id)
+    .neq("type", "dm");
+  if (countError) return { error: countError.message };
+  if ((count ?? 0) <= 1) {
+    return { error: "You need at least one channel in the community" };
+  }
+
+  const { data: fallback } = await supabase
+    .from("channels")
+    .select("slug")
+    .eq("community_id", channel.community_id)
+    .neq("type", "dm")
+    .neq("id", channel.id)
+    .order("name")
+    .limit(1)
+    .maybeSingle();
+
+  const { error } = await supabase.from("channels").delete().eq("id", channel.id);
+  if (error) return { error: error.message };
+
+  if (communitySlug) {
+    revalidatePath(`/c/${communitySlug}`, "layout");
+    redirect(`/c/${communitySlug}/${fallback?.slug || "general"}`);
+  }
+
+  return { ok: true as const };
 }
 
 export async function createDmAction(communityId: string, otherUserId: string) {
@@ -1139,6 +1303,24 @@ export async function upsertAgentAction(communityId: string, formData: FormData)
       .eq("id", id);
     if (error) return { error: error.message };
   } else {
+    const { data: communityBilling } = await supabase
+      .from("communities")
+      .select("plan, slug")
+      .eq("id", communityId)
+      .single();
+
+    if (!isProPlan(communityBilling?.plan)) {
+      const { count } = await supabase
+        .from("agents")
+        .select("*", { count: "exact", head: true })
+        .eq("community_id", communityId);
+      if ((count || 0) >= FREE_MAX_AGENTS) {
+        return {
+          error: `Free communities are limited to ${FREE_MAX_AGENTS} agents. Upgrade to Pro for unlimited agents.`,
+        };
+      }
+    }
+
     const { data, error } = await supabase.from("agents").insert(payload).select("id").single();
     if (error) return { error: error.message };
     agentId = data.id;
@@ -1146,9 +1328,15 @@ export async function upsertAgentAction(communityId: string, formData: FormData)
 
   const avatar = formData.get("avatar");
   if (agentId && avatar instanceof File && avatar.size > 0) {
+    const { data: planRow } = await supabase
+      .from("communities")
+      .select("plan")
+      .eq("id", communityId)
+      .single();
     const uploaded = await uploadAvatarFile(
       agentAvatarPath(communityId, agentId, avatar.type),
       avatar,
+      { maxBytes: maxAvatarBytes(planRow?.plan) },
     );
     if (uploaded.error) return { error: uploaded.error };
     if (uploaded.publicUrl) {
@@ -1344,7 +1532,11 @@ export async function linkAgentsHandoffAction(input: {
 }
 
 function defaultModel(provider: string, kind: string) {
-  if (kind !== "text") {
+  if (kind === "video") {
+    if (provider === "higgsfield") return "higgsfield-ai/dop/standard";
+    return "sora-2";
+  }
+  if (kind === "image") {
     if (provider === "google") return "gemini-2.0-flash-preview-image-generation";
     if (provider === "higgsfield") return "gpt-image-2";
     return "dall-e-3";

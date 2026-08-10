@@ -17,7 +17,12 @@ Multiplayer communities with people and AI agents in the same channels.
 - Persisted realtime chat
 - Create agents with Local (on-device), OpenAI, Anthropic, Google, xAI, OpenRouter, OpenAI-compatible gateways, Higgsfield, and more
 - `@mention` an agent in a channel to prompt it; the reply posts in-chat
+- Image/video agents re-host outputs into durable storage, render inline in chat (preview / player / download), and appear in the Community **Library**
 - Desktop: bundled small Qwen/Llama GGUFs + in-app download for larger models
+
+### Local image/video models (planned)
+
+Cloud media agents ship first. A later desktop phase can add a diffusion sidecar (e.g. `stable-diffusion.cpp`, mirroring the llama.cpp text runtime), expose `local` as a media provider when the desktop app is running, and optionally bundle a small stock image model. Local video generation is a separate follow-up after local image works.
 
 ## Local setup (web)
 

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { CommunityShareLinkPanel } from "@/components/community-share-link";
 import { InviteForm } from "@/components/invite-form";
@@ -5,6 +6,7 @@ import {
   createInviteAction,
   getOrCreateCommunityShareLinkAction,
 } from "@/lib/actions";
+import { FREE_MAX_SEATS, isProPlan } from "@/lib/billing";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function InvitesSettingsPage({
@@ -48,10 +50,32 @@ export default async function InvitesSettingsPage({
   const shareExpiresAt =
     shareLink && "expiresAt" in shareLink ? shareLink.expiresAt : null;
 
+  const { count: seatCount } = await supabase
+    .from("community_members")
+    .select("*", { count: "exact", head: true })
+    .eq("community_id", community.id);
+
+  const atFreeSeatCap =
+    !isProPlan(community.plan) && (seatCount || 0) >= FREE_MAX_SEATS;
+
   return (
     <main className="mx-auto max-w-2xl p-8">
       <h1 className="brand text-3xl">Invites</h1>
       <p className="muted mt-2">Share a link so friends join the same community.</p>
+
+      {atFreeSeatCap ? (
+        <p className="mt-4 rounded-xl border px-4 py-3 text-sm">
+          Free communities are limited to {FREE_MAX_SEATS} members — new joins
+          will be blocked until someone leaves or you{" "}
+          <Link
+            className="underline"
+            href={`/c/${community.slug}/settings/billing`}
+          >
+            upgrade to Pro
+          </Link>
+          .
+        </p>
+      ) : null}
 
       <section className="panel mt-6 rounded-2xl p-5">
         <h2 className="text-base font-medium">Share link</h2>

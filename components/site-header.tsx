@@ -6,7 +6,7 @@ type SiteHeaderProps = {
     displayName: string | null;
     avatarUrl: string | null;
   } | null;
-  active?: "home" | "discover" | "download";
+  active?: "home" | "discover" | "download" | "pricing";
 };
 
 export function SiteHeader({ user, active }: SiteHeaderProps) {
@@ -21,6 +21,12 @@ export function SiteHeader({ user, active }: SiteHeaderProps) {
           href="/discover"
         >
           Discover
+        </Link>
+        <Link
+          className={navClass(active === "pricing")}
+          href="/pricing"
+        >
+          Pricing
         </Link>
         <Link
           className={navClass(active === "download")}

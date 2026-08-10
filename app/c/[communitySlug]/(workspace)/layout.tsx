@@ -192,6 +192,41 @@ export default async function CommunityWorkspaceLayout({
             }))}
           />
 
+          <div>
+            <SidebarSectionHeader label="Library" />
+            <Link
+              href={`/c/${c.slug}/library`}
+              className="nav-hover flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm"
+              style={{ color: "var(--ink)" }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+              >
+                <rect
+                  x="3"
+                  y="5"
+                  width="18"
+                  height="14"
+                  rx="2"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <circle cx="9" cy="10" r="1.5" fill="currentColor" />
+                <path
+                  d="M4 16l5-4 3 2 4-5 4 7"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  fill="none"
+                />
+              </svg>
+              Generated media
+            </Link>
+          </div>
+
           <DirectMessagesSidebarList
             communityId={c.id}
             communitySlug={c.slug}

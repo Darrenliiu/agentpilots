@@ -1,9 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  FREE_MAX_ATTACHMENT_BYTES,
+  formatBytesLimit,
+  maxAttachmentBytes,
+} from "@/lib/billing";
 import type { MessageAttachment } from "@/lib/types";
 
 export const MESSAGE_ATTACHMENT_BUCKET = "message-attachments";
 export const MAX_MESSAGE_ATTACHMENTS = 5;
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+/** @deprecated Prefer maxAttachmentBytes(plan) — Free default kept for callers without plan. */
+export const MAX_ATTACHMENT_BYTES = FREE_MAX_ATTACHMENT_BYTES;
 
 const IMAGE_TYPES = new Set([
   "image/png",
@@ -73,10 +79,14 @@ function extForMime(mime: string, fallbackName: string) {
 
 export function validateAttachmentFile(
   file: File,
+  maxBytes: number = FREE_MAX_ATTACHMENT_BYTES,
 ): { ok: true; mime: string } | { ok: false; error: string } {
   if (!file || file.size === 0) return { ok: false, error: "Empty file" };
-  if (file.size > MAX_ATTACHMENT_BYTES) {
-    return { ok: false, error: `${file.name} must be 10MB or smaller` };
+  if (file.size > maxBytes) {
+    return {
+      ok: false,
+      error: `${file.name} must be ${formatBytesLimit(maxBytes)} or smaller`,
+    };
   }
   const mime = resolveAttachmentMime(file);
   if (!isAllowedAttachmentMime(mime)) {
@@ -93,6 +103,8 @@ export async function uploadMessageAttachments(opts: {
   communityId: string;
   channelId: string;
   files: File[];
+  /** Community plan for size limits; if omitted, Free limits apply. */
+  plan?: string | null;
 }): Promise<{ attachments: MessageAttachment[]; error?: string }> {
   if (opts.files.length > MAX_MESSAGE_ATTACHMENTS) {
     return {
@@ -101,11 +113,12 @@ export async function uploadMessageAttachments(opts: {
     };
   }
 
+  const maxBytes = maxAttachmentBytes(opts.plan);
   const batchId = crypto.randomUUID();
   const attachments: MessageAttachment[] = [];
 
   for (const file of opts.files) {
-    const validated = validateAttachmentFile(file);
+    const validated = validateAttachmentFile(file, maxBytes);
     if (!validated.ok) return { attachments: [], error: validated.error };
 
     const ext = extForMime(validated.mime, file.name);

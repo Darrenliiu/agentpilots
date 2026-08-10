@@ -17,6 +17,7 @@ import {
   mcpClientMetadataUrl,
   refreshAccessToken,
 } from "@/lib/connectors/oauth";
+import { linkMediaAssetToMessage } from "@/lib/community-media";
 import { ensureLocalModelActive } from "@/lib/local-llm";
 import { formatSkillsForSystemPrompt } from "@/lib/skills/parse";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -244,11 +245,21 @@ async function runTargetAgents(opts: {
           metadata.usage = result.usage;
         }
       } else {
+        const generatingLabel =
+          agent.kind === "video" ? "Generating video" : "Generating image";
         await publishProgress({
           phase: "generating",
-          statusText: "Generating image",
+          statusText: generatingLabel,
         });
-        const media = await generateAgentMediaReply({ agent, apiKey, prompt });
+        const media = await generateAgentMediaReply({
+          agent,
+          apiKey,
+          prompt,
+          communityId: channel.community_id,
+          channelId: channel.id,
+          createdBy: authorId,
+          onProgress: publishProgress,
+        });
         body = media.body;
         metadata = { ...metadata, ...media.metadata };
       }
@@ -270,6 +281,12 @@ async function runTargetAgents(opts: {
         .select("*")
         .single();
       if (replyErr) throw replyErr;
+
+      const assetId =
+        typeof metadata.asset_id === "string" ? metadata.asset_id : null;
+      if (assetId) {
+        await linkMediaAssetToMessage(assetId, reply.id, channel.id);
+      }
 
       if (run) {
         await admin

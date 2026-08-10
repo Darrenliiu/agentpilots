@@ -53,7 +53,10 @@ export async function updateSession(request: NextRequest) {
   // Desktop: skip marketing surfaces — auth is the landing surface
   if (
     isDesktop &&
-    (path === "/" || path.startsWith("/discover") || path.startsWith("/download"))
+    (path === "/" ||
+      path.startsWith("/discover") ||
+      path.startsWith("/download") ||
+      path.startsWith("/pricing"))
   ) {
     const url = request.nextUrl.clone();
     url.pathname = user ? "/home" : "/login";
@@ -67,6 +70,7 @@ export async function updateSession(request: NextRequest) {
     path === "/" ||
     path.startsWith("/discover") ||
     path.startsWith("/download") ||
+    path.startsWith("/pricing") ||
     path.startsWith("/_next");
 
   if (!user && !isPublic) {

@@ -8,6 +8,7 @@ import {
   updateCommunityShareLinkExpiryAction,
   type ShareLinkExpiryPreset,
 } from "@/lib/actions";
+import { absoluteShareUrl, publicShareOrigin } from "@/lib/site-url";
 
 const EXPIRY_OPTIONS: { value: ShareLinkExpiryPreset; label: string }[] = [
   { value: "1d", label: "1 day" },
@@ -82,15 +83,17 @@ export function CommunityShareLinkPanel({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [pending, start] = useTransition();
-  const [origin, setOrigin] = useState("");
+  const [origin, setOrigin] = useState(() =>
+    typeof window !== "undefined" ? publicShareOrigin() : "",
+  );
 
   useEffect(() => {
-    setOrigin(window.location.origin);
+    setOrigin(publicShareOrigin());
   }, []);
 
   const absoluteUrl = useMemo(() => {
     if (!path) return null;
-    return origin ? `${origin}${path}` : path;
+    return origin ? `${origin}${path}` : absoluteShareUrl(path);
   }, [origin, path]);
 
   useEffect(() => {
@@ -128,11 +131,7 @@ export function CommunityShareLinkPanel({
   }
 
   function copyLink() {
-    const url =
-      absoluteUrl ||
-      (path && typeof window !== "undefined"
-        ? `${window.location.origin}${path}`
-        : null);
+    const url = absoluteUrl || (path ? absoluteShareUrl(path) : null);
     if (!url) return;
     start(async () => {
       try {

@@ -47,6 +47,9 @@ export default async function HomeAppPage() {
               <Link className="btn secondary" href="/discover">
                 Discover
               </Link>
+              <Link className="btn secondary" href="/pricing">
+                Pricing
+              </Link>
               <Link className="btn secondary" href="/download">
                 Download
               </Link>

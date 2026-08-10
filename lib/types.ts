@@ -1,5 +1,7 @@
 export type CommunityRole = "owner" | "admin" | "member";
 export type CommunityVisibility = "public" | "private";
+export type CommunityPlan = "free" | "pro";
+export type CommunityBillingInterval = "month" | "year";
 export type ChannelType = "public" | "private" | "dm";
 export type AgentKind = "text" | "image" | "video";
 export type AgentStatus = "active" | "disabled";
@@ -48,6 +50,11 @@ export type Community = {
   visibility: CommunityVisibility;
   discoverable: boolean;
   theme: string;
+  plan: CommunityPlan;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  stripe_subscription_status: string | null;
+  billing_interval: CommunityBillingInterval | null;
   created_by: string;
   created_at: string;
 };
@@ -214,8 +221,26 @@ export const DEFAULT_LOCAL_MODEL_ID = "qwen2.5-1.5b-instruct";
 export const DEFAULT_LOCAL_LLM_BASE_URL = "http://127.0.0.1:11435/v1";
 
 export const MEDIA_PROVIDERS = [
-  { id: "openai", label: "OpenAI Images" },
+  { id: "openai", label: "OpenAI" },
   { id: "google", label: "Gemini Image" },
   { id: "higgsfield", label: "Higgsfield" },
   { id: "midjourney", label: "Midjourney (coming soon)", disabled: true },
 ] as const;
+
+export type CommunityMediaAsset = {
+  id: string;
+  community_id: string;
+  channel_id: string | null;
+  message_id: string | null;
+  agent_id: string | null;
+  created_by: string | null;
+  kind: "image" | "video";
+  mime: string;
+  storage_path: string;
+  public_url: string;
+  prompt: string;
+  provider: string | null;
+  model: string | null;
+  bytes: number | null;
+  created_at: string;
+};

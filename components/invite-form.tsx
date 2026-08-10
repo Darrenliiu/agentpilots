@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { absoluteShareUrl } from "@/lib/site-url";
 
 export function InviteForm({
   communityId,
@@ -53,9 +54,7 @@ export function InviteForm({
       ) : null}
       {token ? (
         <p className="rounded-xl bg-black/5 p-3 text-sm break-all">
-          Invite link:{" "}
-          {typeof window !== "undefined" ? window.location.origin : ""}
-          /join/{token}
+          Invite link: {absoluteShareUrl(`/join/${token}`)}
         </p>
       ) : null}
       <button className="btn" disabled={pending} type="submit">

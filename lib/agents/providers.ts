@@ -18,7 +18,14 @@ import {
   isTextMime,
 } from "@/lib/message-attachments";
 import type { Agent, AgentRunPhase, MessageAttachment } from "@/lib/types";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  mediaKindFromAgentKind,
+  persistBase64Media,
+  persistGeneratedMedia,
+  rehostRemoteMedia,
+  type CommunityMediaKind,
+  type PersistedMedia,
+} from "@/lib/community-media";
 
 const NATIVE_WEB_SEARCH_KEYS = new Set(["web_search", "google_search"]);
 
@@ -330,95 +337,280 @@ function getLanguageModel(
   }
 }
 
-export async function generateAgentMediaReply(opts: {
+export type GenerateMediaOpts = {
   agent: Agent;
   apiKey: string;
   prompt: string;
-}): Promise<{ body: string; metadata: Record<string, unknown> }> {
-  if (opts.agent.provider === "midjourney") {
-    return {
-      body: "Midjourney is not available yet. Switch this agent to OpenAI, Gemini, or Higgsfield.",
-      metadata: { kind: opts.agent.kind, pending: true },
-    };
-  }
+  communityId: string;
+  channelId?: string | null;
+  createdBy?: string | null;
+  onProgress?: (update: AgentProgressUpdate) => void | Promise<void>;
+};
 
-  if (opts.agent.provider === "higgsfield") {
-    const res = await fetch("https://platform.higgsfield.ai/v1/images/generations", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${opts.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        prompt: opts.prompt,
-        model: opts.agent.model || "gpt-image-2",
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Higgsfield error: ${err}`);
-    }
-    const data = (await res.json()) as {
-      data?: { url?: string; b64_json?: string }[];
-      url?: string;
-    };
-    const url = data.data?.[0]?.url || data.url;
-    if (url) {
-      return {
-        body: opts.prompt,
-        metadata: { kind: opts.agent.kind, media_url: url, provider: "higgsfield" },
-      };
-    }
-    const b64 = data.data?.[0]?.b64_json;
-    if (b64) {
-      const mediaUrl = await uploadBase64Media(b64, "image/png", opts.agent.id);
-      return {
-        body: opts.prompt,
-        metadata: { kind: opts.agent.kind, media_url: mediaUrl, provider: "higgsfield" },
-      };
-    }
-    throw new Error("Higgsfield returned no media");
-  }
+function mediaMetadata(
+  agent: Agent,
+  persisted: PersistedMedia,
+  prompt: string,
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    kind: agent.kind,
+    media_url: persisted.publicUrl,
+    media_mime: persisted.mime,
+    media_kind: persisted.kind,
+    asset_id: persisted.assetId,
+    provider: agent.provider,
+    model: agent.model,
+    prompt,
+    ...extra,
+  };
+}
 
-  if (opts.agent.provider === "google") {
-    const model = opts.agent.model || "gemini-2.0-flash-preview-image-generation";
+function higgsfieldAuthHeader(apiKey: string) {
+  // Platform model queue expects "Key id:secret"; image OpenAI-compat path accepts Bearer.
+  if (apiKey.includes(":")) return `Key ${apiKey}`;
+  return `Bearer ${apiKey}`;
+}
+
+async function sleep(ms: number) {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+async function pollHiggsfieldRequest(opts: {
+  apiKey: string;
+  requestId: string;
+  onProgress?: GenerateMediaOpts["onProgress"];
+  label: string;
+}): Promise<{ images?: { url?: string }[]; video?: { url?: string }; url?: string }> {
+  const auth = higgsfieldAuthHeader(opts.apiKey);
+  const maxAttempts = 90;
+  for (let i = 0; i < maxAttempts; i++) {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${opts.apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: opts.prompt }] }],
-          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-        }),
-      },
+      `https://platform.higgsfield.ai/requests/${opts.requestId}/status`,
+      { headers: { Authorization: auth, Accept: "application/json" } },
     );
     if (!res.ok) {
-      throw new Error(`Gemini media error: ${await res.text()}`);
+      throw new Error(`Higgsfield status error: ${await res.text()}`);
     }
     const data = (await res.json()) as {
-      candidates?: {
-        content?: { parts?: { text?: string; inlineData?: { data: string; mimeType: string } }[] };
-      }[];
+      status?: string;
+      images?: { url?: string }[];
+      video?: { url?: string };
+      url?: string;
     };
-    const parts = data.candidates?.[0]?.content?.parts || [];
-    const inline = parts.find((p) => p.inlineData)?.inlineData;
-    const text = parts.find((p) => p.text)?.text;
-    if (inline?.data) {
-      const mediaUrl = await uploadBase64Media(
-        inline.data,
-        inline.mimeType || "image/png",
-        opts.agent.id,
-      );
-      return {
-        body: text || opts.prompt,
-        metadata: { kind: opts.agent.kind, media_url: mediaUrl, provider: "google" },
-      };
+    const status = (data.status || "").toLowerCase();
+    if (status === "completed") return data;
+    if (status === "failed" || status === "nsfw") {
+      throw new Error(`Higgsfield generation ${status}`);
     }
-    return { body: text || "No image returned.", metadata: { kind: opts.agent.kind } };
+    await opts.onProgress?.({
+      phase: "generating",
+      statusText: `${opts.label} (${status || "queued"}…)`,
+    });
+    await sleep(2000);
   }
+  throw new Error("Higgsfield generation timed out");
+}
 
-  // OpenAI images
+async function generateHiggsfieldImage(opts: GenerateMediaOpts): Promise<{
+  body: string;
+  metadata: Record<string, unknown>;
+}> {
+  const model = opts.agent.model || "gpt-image-2";
+  const res = await fetch("https://platform.higgsfield.ai/v1/images/generations", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${opts.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      prompt: opts.prompt,
+      model,
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`Higgsfield error: ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    data?: { url?: string; b64_json?: string }[];
+    url?: string;
+  };
+  const url = data.data?.[0]?.url || data.url;
+  let persisted: PersistedMedia;
+  if (url) {
+    persisted = await rehostRemoteMedia({
+      url,
+      communityId: opts.communityId,
+      agentId: opts.agent.id,
+      kind: "image",
+      prompt: opts.prompt,
+      provider: "higgsfield",
+      model,
+      channelId: opts.channelId,
+      createdBy: opts.createdBy,
+    });
+  } else if (data.data?.[0]?.b64_json) {
+    persisted = await persistBase64Media({
+      b64: data.data[0].b64_json,
+      mime: "image/png",
+      communityId: opts.communityId,
+      agentId: opts.agent.id,
+      kind: "image",
+      prompt: opts.prompt,
+      provider: "higgsfield",
+      model,
+      channelId: opts.channelId,
+      createdBy: opts.createdBy,
+    });
+  } else {
+    throw new Error("Higgsfield returned no media");
+  }
+  return {
+    body: opts.prompt,
+    metadata: mediaMetadata(opts.agent, persisted, opts.prompt),
+  };
+}
+
+async function generateHiggsfieldVideo(opts: GenerateMediaOpts): Promise<{
+  body: string;
+  metadata: Record<string, unknown>;
+}> {
+  const model = opts.agent.model || "higgsfield-ai/dop/standard";
+  await opts.onProgress?.({
+    phase: "generating",
+    statusText: "Generating starter frame",
+  });
+
+  // Text-to-video via image frame + image-to-video (Higgsfield video models expect image_url).
+  const frame = await generateHiggsfieldImage({
+    ...opts,
+    agent: {
+      ...opts.agent,
+      kind: "image",
+      model: "gpt-image-2",
+    },
+  });
+  const imageUrl = String(frame.metadata.media_url || "");
+  if (!imageUrl) throw new Error("Could not create frame for video");
+
+  await opts.onProgress?.({
+    phase: "generating",
+    statusText: "Generating video",
+  });
+
+  const auth = higgsfieldAuthHeader(opts.apiKey);
+  const submit = await fetch(`https://platform.higgsfield.ai/${model}`, {
+    method: "POST",
+    headers: {
+      Authorization: auth,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      prompt: opts.prompt,
+      image_url: imageUrl,
+      duration: 5,
+    }),
+  });
+  if (!submit.ok) {
+    throw new Error(`Higgsfield video error: ${await submit.text()}`);
+  }
+  const queued = (await submit.json()) as { request_id?: string; status?: string };
+  if (!queued.request_id) {
+    throw new Error("Higgsfield video did not return a request_id");
+  }
+  const done = await pollHiggsfieldRequest({
+    apiKey: opts.apiKey,
+    requestId: queued.request_id,
+    onProgress: opts.onProgress,
+    label: "Generating video",
+  });
+  const videoUrl = done.video?.url || done.url || done.images?.[0]?.url;
+  if (!videoUrl) throw new Error("Higgsfield returned no video URL");
+
+  const persisted = await rehostRemoteMedia({
+    url: videoUrl,
+    communityId: opts.communityId,
+    agentId: opts.agent.id,
+    kind: "video",
+    prompt: opts.prompt,
+    provider: "higgsfield",
+    model,
+    fallbackMime: "video/mp4",
+    channelId: opts.channelId,
+    createdBy: opts.createdBy,
+  });
+
+  return {
+    body: opts.prompt,
+    metadata: mediaMetadata(opts.agent, persisted, opts.prompt, {
+      frame_asset_id: frame.metadata.asset_id,
+    }),
+  };
+}
+
+async function generateGoogleImage(opts: GenerateMediaOpts): Promise<{
+  body: string;
+  metadata: Record<string, unknown>;
+}> {
+  const model = opts.agent.model || "gemini-2.0-flash-preview-image-generation";
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${opts.apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: opts.prompt }] }],
+        generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+      }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`Gemini media error: ${await res.text()}`);
+  }
+  const data = (await res.json()) as {
+    candidates?: {
+      content?: {
+        parts?: {
+          text?: string;
+          inlineData?: { data: string; mimeType: string };
+        }[];
+      };
+    }[];
+  };
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  const inline = parts.find((p) => p.inlineData)?.inlineData;
+  const text = parts.find((p) => p.text)?.text;
+  if (!inline?.data) {
+    return {
+      body: text || "No image returned.",
+      metadata: { kind: opts.agent.kind, provider: "google" },
+    };
+  }
+  const mime = inline.mimeType || "image/png";
+  const persisted = await persistBase64Media({
+    b64: inline.data,
+    mime,
+    communityId: opts.communityId,
+    agentId: opts.agent.id,
+    kind: "image",
+    prompt: opts.prompt,
+    provider: "google",
+    model,
+    channelId: opts.channelId,
+    createdBy: opts.createdBy,
+  });
+  return {
+    body: text || opts.prompt,
+    metadata: mediaMetadata(opts.agent, persisted, opts.prompt),
+  };
+}
+
+async function generateOpenAIImage(opts: GenerateMediaOpts): Promise<{
+  body: string;
+  metadata: Record<string, unknown>;
+}> {
+  const model = opts.agent.model || "dall-e-3";
   const res = await fetch("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: {
@@ -426,7 +618,7 @@ export async function generateAgentMediaReply(opts: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: opts.agent.model || "dall-e-3",
+      model,
       prompt: opts.prompt,
       size: "1024x1024",
       n: 1,
@@ -435,38 +627,199 @@ export async function generateAgentMediaReply(opts: {
   if (!res.ok) {
     throw new Error(`OpenAI image error: ${await res.text()}`);
   }
-  const result = (await res.json()) as { data?: { url?: string; b64_json?: string }[] };
+  const result = (await res.json()) as {
+    data?: { url?: string; b64_json?: string }[];
+  };
   const url = result.data?.[0]?.url;
+  let persisted: PersistedMedia;
   if (url) {
-    return {
-      body: opts.prompt,
-      metadata: { kind: opts.agent.kind, media_url: url, provider: "openai" },
-    };
+    persisted = await rehostRemoteMedia({
+      url,
+      communityId: opts.communityId,
+      agentId: opts.agent.id,
+      kind: "image",
+      prompt: opts.prompt,
+      provider: "openai",
+      model,
+      channelId: opts.channelId,
+      createdBy: opts.createdBy,
+    });
+  } else if (result.data?.[0]?.b64_json) {
+    persisted = await persistBase64Media({
+      b64: result.data[0].b64_json,
+      mime: "image/png",
+      communityId: opts.communityId,
+      agentId: opts.agent.id,
+      kind: "image",
+      prompt: opts.prompt,
+      provider: "openai",
+      model,
+      channelId: opts.channelId,
+      createdBy: opts.createdBy,
+    });
+  } else {
+    throw new Error("OpenAI image generation returned no media");
   }
-  const b64 = result.data?.[0]?.b64_json;
-  if (b64) {
-    const mediaUrl = await uploadBase64Media(b64, "image/png", opts.agent.id);
-    return {
-      body: opts.prompt,
-      metadata: { kind: opts.agent.kind, media_url: mediaUrl, provider: "openai" },
-    };
-  }
-  throw new Error("OpenAI image generation returned no media");
+  return {
+    body: opts.prompt,
+    metadata: mediaMetadata(opts.agent, persisted, opts.prompt),
+  };
 }
 
-async function uploadBase64Media(b64: string, mime: string, agentId: string) {
-  const admin = createAdminClient();
-  const ext = mime.includes("jpeg") ? "jpg" : mime.includes("webp") ? "webp" : "png";
-  const path = `${agentId}/${Date.now()}.${ext}`;
-  const buffer = Buffer.from(b64, "base64");
-  const { error } = await admin.storage.from("agent-media").upload(path, buffer, {
-    contentType: mime,
-    upsert: false,
+async function generateOpenAIVideo(opts: GenerateMediaOpts): Promise<{
+  body: string;
+  metadata: Record<string, unknown>;
+}> {
+  const model = opts.agent.model || "sora-2";
+  await opts.onProgress?.({
+    phase: "generating",
+    statusText: "Starting video job",
   });
-  if (error) throw error;
-  const { data } = admin.storage.from("agent-media").getPublicUrl(path);
-  return data.publicUrl;
+
+  const create = await fetch("https://api.openai.com/v1/videos", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${opts.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      prompt: opts.prompt,
+    }),
+  });
+  if (!create.ok) {
+    throw new Error(`OpenAI video error: ${await create.text()}`);
+  }
+  const job = (await create.json()) as {
+    id?: string;
+    status?: string;
+    error?: { message?: string };
+  };
+  if (!job.id) throw new Error("OpenAI video job missing id");
+
+  const maxAttempts = 120;
+  for (let i = 0; i < maxAttempts; i++) {
+    const statusRes = await fetch(`https://api.openai.com/v1/videos/${job.id}`, {
+      headers: { Authorization: `Bearer ${opts.apiKey}` },
+    });
+    if (!statusRes.ok) {
+      throw new Error(`OpenAI video status error: ${await statusRes.text()}`);
+    }
+    const status = (await statusRes.json()) as {
+      id: string;
+      status?: string;
+      error?: { message?: string };
+      video_url?: string;
+      url?: string;
+    };
+    const state = (status.status || "").toLowerCase();
+    if (state === "failed" || state === "cancelled") {
+      throw new Error(
+        status.error?.message || `OpenAI video ${state || "failed"}`,
+      );
+    }
+    if (state === "completed") {
+      const contentRes = await fetch(
+        `https://api.openai.com/v1/videos/${job.id}/content`,
+        { headers: { Authorization: `Bearer ${opts.apiKey}` } },
+      );
+      if (contentRes.ok) {
+        const mime =
+          contentRes.headers.get("content-type")?.split(";")[0]?.trim() ||
+          "video/mp4";
+        const buffer = Buffer.from(await contentRes.arrayBuffer());
+        const persisted = await persistGeneratedMedia({
+          communityId: opts.communityId,
+          agentId: opts.agent.id,
+          kind: "video",
+          mime,
+          bytes: buffer,
+          prompt: opts.prompt,
+          provider: "openai",
+          model,
+          channelId: opts.channelId,
+          createdBy: opts.createdBy,
+        });
+        return {
+          body: opts.prompt,
+          metadata: mediaMetadata(opts.agent, persisted, opts.prompt),
+        };
+      }
+      const remoteUrl = status.video_url || status.url;
+      if (remoteUrl) {
+        const persisted = await rehostRemoteMedia({
+          url: remoteUrl,
+          communityId: opts.communityId,
+          agentId: opts.agent.id,
+          kind: "video",
+          prompt: opts.prompt,
+          provider: "openai",
+          model,
+          fallbackMime: "video/mp4",
+          channelId: opts.channelId,
+          createdBy: opts.createdBy,
+        });
+        return {
+          body: opts.prompt,
+          metadata: mediaMetadata(opts.agent, persisted, opts.prompt),
+        };
+      }
+      throw new Error("OpenAI video completed but no content was returned");
+    }
+    await opts.onProgress?.({
+      phase: "generating",
+      statusText: `Generating video (${state || "queued"}…)`,
+    });
+    await sleep(3000);
+  }
+  throw new Error("OpenAI video generation timed out");
 }
+
+export async function generateAgentMediaReply(
+  opts: GenerateMediaOpts,
+): Promise<{ body: string; metadata: Record<string, unknown> }> {
+  const mediaKind = mediaKindFromAgentKind(opts.agent.kind);
+
+  if (opts.agent.provider === "midjourney") {
+    return {
+      body: "Midjourney is not available yet. Switch this agent to OpenAI, Gemini, or Higgsfield.",
+      metadata: { kind: opts.agent.kind, pending: true },
+    };
+  }
+
+  if (mediaKind === "video") {
+    if (opts.agent.provider === "google") {
+      throw new Error(
+        "Gemini does not support video agents yet. Use OpenAI (Sora) or Higgsfield.",
+      );
+    }
+    if (opts.agent.provider === "higgsfield") {
+      return generateHiggsfieldVideo(opts);
+    }
+    if (opts.agent.provider === "openai") {
+      return generateOpenAIVideo(opts);
+    }
+    throw new Error(
+      `Provider "${opts.agent.provider}" does not support video generation.`,
+    );
+  }
+
+  if (opts.agent.provider === "higgsfield") {
+    return generateHiggsfieldImage(opts);
+  }
+  if (opts.agent.provider === "google") {
+    return generateGoogleImage(opts);
+  }
+  if (opts.agent.provider === "openai") {
+    return generateOpenAIImage(opts);
+  }
+  throw new Error(
+    `Provider "${opts.agent.provider}" does not support image generation.`,
+  );
+}
+
+// Keep type import used for callers that only need the kind helper.
+export type { CommunityMediaKind };
 
 export function extractMentionedAgentIds(
   body: string,

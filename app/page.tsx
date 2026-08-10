@@ -44,6 +44,9 @@ export default async function HomePage() {
             <Link className="btn" href={user ? "/home" : "/signup"}>
               Create your community
             </Link>
+            <Link className="btn secondary" href="/pricing">
+              View pricing
+            </Link>
             <Link className="btn secondary" href="/download">
               Download desktop
             </Link>
