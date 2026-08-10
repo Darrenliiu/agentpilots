@@ -23,6 +23,9 @@ type RunRow = {
   status_text: string | null;
   error: string | null;
   result_message_id: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  total_tokens?: number | null;
   created_at: string;
   updated_at: string;
   agents?:
@@ -53,6 +56,9 @@ function normalizeRun(row: RunRow): ActiveAgentRun {
     status_text: row.status_text,
     error: row.error,
     result_message_id: row.result_message_id,
+    input_tokens: row.input_tokens ?? null,
+    output_tokens: row.output_tokens ?? null,
+    total_tokens: row.total_tokens ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     agent: agent

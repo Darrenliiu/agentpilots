@@ -1,10 +1,6 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { isDesktopClient } from "@/lib/desktop";
 
-/** On desktop, brand stays on auth; on web it goes to marketing `/`. */
+/** Brand on auth screens always returns to the marketing homepage. */
 export function AuthBrandLink({
   className,
   children = "AgentPilots",
@@ -12,14 +8,8 @@ export function AuthBrandLink({
   className?: string;
   children?: React.ReactNode;
 }) {
-  const [href, setHref] = useState("/login");
-
-  useEffect(() => {
-    setHref(isDesktopClient() ? "/login" : "/");
-  }, []);
-
   return (
-    <Link className={className} href={href}>
+    <Link className={className} href="/">
       {children}
     </Link>
   );

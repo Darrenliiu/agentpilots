@@ -289,6 +289,24 @@ async function runTargetAgents(opts: {
       }
 
       if (run) {
+        const usage =
+          metadata.usage && typeof metadata.usage === "object"
+            ? (metadata.usage as {
+                inputTokens?: number | null;
+                outputTokens?: number | null;
+                totalTokens?: number | null;
+              })
+            : null;
+        const inputTokens =
+          typeof usage?.inputTokens === "number" ? usage.inputTokens : null;
+        const outputTokens =
+          typeof usage?.outputTokens === "number" ? usage.outputTokens : null;
+        const totalTokens =
+          typeof usage?.totalTokens === "number"
+            ? usage.totalTokens
+            : inputTokens != null && outputTokens != null
+              ? inputTokens + outputTokens
+              : null;
         await admin
           .from("agent_runs")
           .update({
@@ -296,6 +314,9 @@ async function runTargetAgents(opts: {
             phase: "done",
             status_text: null,
             result_message_id: reply.id,
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            total_tokens: totalTokens,
           })
           .eq("id", run.id);
       }

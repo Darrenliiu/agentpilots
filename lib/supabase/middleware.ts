@@ -42,7 +42,6 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isDesktop = process.env.AGENTPILOTS_DESKTOP === "1";
   const isAuthPage =
     path.startsWith("/login") ||
     path.startsWith("/signup") ||
@@ -50,20 +49,7 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/forgot-password") ||
     path.startsWith("/auth/");
 
-  // Desktop: skip marketing surfaces — auth is the landing surface
-  if (
-    isDesktop &&
-    (path === "/" ||
-      path.startsWith("/discover") ||
-      path.startsWith("/download") ||
-      path.startsWith("/pricing"))
-  ) {
-    const url = request.nextUrl.clone();
-    url.pathname = user ? "/home" : "/login";
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
-
+  // Marketing + auth surfaces are reachable without a session (web and desktop).
   const isPublic =
     isAuthPage ||
     path.startsWith("/api") ||

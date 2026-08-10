@@ -103,12 +103,17 @@ select {
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 0 0.25rem;
+  gap: 1.5rem;
+  padding: 0 0.25rem 0.5rem;
+}
+
+.settings-nav-section + .settings-nav-section {
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
 }
 
 .settings-nav-section__title {
-  margin: 0 0 0.3rem 0.5rem;
+  margin: 0 0 0.45rem 0.5rem;
   font-size: 0.625rem;
   font-weight: 650;
   letter-spacing: 0.06em;
@@ -180,6 +185,16 @@ select {
   background: var(--panel);
   border: 1px solid var(--line);
   backdrop-filter: blur(10px);
+}
+
+.usage-chart__tick {
+  fill: var(--ink-muted);
+  font-size: 10px;
+}
+
+.usage-table th,
+.usage-table td {
+  vertical-align: middle;
 }
 
 .btn {

@@ -131,6 +131,9 @@ export type AgentRun = {
   status_text: string | null;
   error: string | null;
   result_message_id: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
   created_at: string;
   updated_at: string;
   agent?: Pick<Agent, "id" | "name" | "avatar_url"> | null;

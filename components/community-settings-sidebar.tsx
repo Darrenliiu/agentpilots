@@ -66,6 +66,15 @@ const COMMUNITY: NavItem[] = [
     ),
   },
   {
+    segment: "channels",
+    label: "Channels",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+        <path d="M5 7.5h14M5 12h14M5 16.5h9" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     segment: "billing",
     label: "Billing",
     icon: (
@@ -76,14 +85,18 @@ const COMMUNITY: NavItem[] = [
     ),
   },
   {
-    segment: "channels",
-    label: "Channels",
+    segment: "usage",
+    label: "Usage",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
-        <path d="M5 7.5h14M5 12h14M5 16.5h9" strokeLinecap="round" />
+        <path d="M4.5 16.5 9 12l3.5 3.5L19.5 7.5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M4.5 19.5h15" strokeLinecap="round" />
       </svg>
     ),
   },
+];
+
+const APP: NavItem[] = [
   {
     segment: "agents",
     label: "Agents",
@@ -138,6 +151,12 @@ const COMMUNITY: NavItem[] = [
   },
 ];
 
+const ALL_SECTIONS: { title: string; items: NavItem[] }[] = [
+  { title: "Personal", items: PERSONAL },
+  { title: "Community", items: COMMUNITY },
+  { title: "App", items: APP },
+];
+
 function NavLink({
   href,
   label,
@@ -186,6 +205,10 @@ export function CommunitySettingsSidebar({
     return pathname === href || pathname.startsWith(`${href}/`);
   }
 
+  function itemHref(segment: string) {
+    return segment ? `${base}/${segment}` : base;
+  }
+
   return (
     <aside className="settings-sidebar panel sticky top-0 flex h-screen flex-col overflow-hidden border-r">
       <div className="settings-sidebar__top">
@@ -198,29 +221,19 @@ export function CommunitySettingsSidebar({
       </div>
 
       <nav className="settings-sidebar__nav" aria-label="Settings">
-        <NavSection title="Personal">
-          {PERSONAL.map((item) => (
-            <NavLink
-              key={item.label}
-              href={`${base}/${item.segment}`}
-              label={item.label}
-              icon={item.icon}
-              active={isActive(item.segment)}
-            />
-          ))}
-        </NavSection>
-
-        <NavSection title="Community">
-          {COMMUNITY.map((item) => (
-            <NavLink
-              key={item.label}
-              href={item.segment ? `${base}/${item.segment}` : base}
-              label={item.label}
-              icon={item.icon}
-              active={isActive(item.segment)}
-            />
-          ))}
-        </NavSection>
+        {ALL_SECTIONS.map((section) => (
+          <NavSection key={section.title} title={section.title}>
+            {section.items.map((item) => (
+              <NavLink
+                key={item.label}
+                href={itemHref(item.segment)}
+                label={item.label}
+                icon={item.icon}
+                active={isActive(item.segment)}
+              />
+            ))}
+          </NavSection>
+        ))}
       </nav>
 
       <p className="settings-sidebar__version muted">v{version}</p>
@@ -236,7 +249,7 @@ export function CommunitySettingsMobileNav({
 }) {
   const pathname = usePathname();
   const base = `/c/${communitySlug}/settings`;
-  const items = [...PERSONAL, ...COMMUNITY];
+  const items = ALL_SECTIONS.flatMap((section) => section.items);
 
   return (
     <div className="settings-mobile-nav">
