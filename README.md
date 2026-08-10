@@ -61,6 +61,23 @@ npm run desktop:dist:mac
 
 Installers ship **without** GGUFs. In the desktop app, open **Local models** to download Qwen/Llama weights into the app userData `models/` folder. For local packaging tests you can prefetch into `desktop/resources/models/` with `npm run desktop:fetch-models`.
 
+### Install Mac (Apple Silicon, unsigned)
+
+macOS Gatekeeper blocks browser-downloaded unsigned apps (“damaged and can’t be opened”). Prefer the Terminal installer, which downloads the DMG, copies the app to `/Applications`, clears quarantine, and launches:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Darrenliiu/agentpilots/main/desktop/scripts/install-mac.sh | bash
+```
+
+If you already installed from the DMG:
+
+```bash
+xattr -cr /Applications/AgentPilots.app
+open /Applications/AgentPilots.app
+```
+
+Sign in with the same account as the web app — communities sync through Supabase. After an auto-update, if Gatekeeper blocks again, re-run the install script or `xattr -cr`. Normal double-click installs require Apple Developer ID signing + notarization (not configured yet).
+
 ## Keeping desktop synced with web (auto-update + CI)
 
 Web (Vercel) and desktop share this repo. Data stays synced through Supabase. **App code** on installed desktops updates when CI publishes a new GitHub Release.
@@ -93,6 +110,8 @@ CI will:
 3. Upload installers as workflow artifacts
 
 Installed apps check GitHub Releases on launch (and every 6 hours), download updates, and prompt to restart. A banner also appears in the desktop UI when an update is downloading or ready.
+
+On **unsigned Mac** builds, an update may re-trigger Gatekeeper. If the app won’t open after updating, re-run the Terminal install script or `xattr -cr /Applications/AgentPilots.app`.
 
 ### Local publish (optional)
 

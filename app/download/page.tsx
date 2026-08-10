@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DownloadCopyCommand } from "@/components/download-copy-command";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import {
   getDesktopVersionLabel,
   getMacDownloadUrl,
+  getMacInstallCommand,
   getWindowsDownloadUrl,
 } from "@/lib/desktop-download";
 import { createClient } from "@/lib/supabase/server";
@@ -31,6 +33,7 @@ export default async function DownloadPage() {
 
   const windowsUrl = getWindowsDownloadUrl();
   const macUrl = getMacDownloadUrl();
+  const macInstallCommand = getMacInstallCommand();
   const version = getDesktopVersionLabel();
 
   return (
@@ -94,7 +97,7 @@ export default async function DownloadPage() {
                 <PlatformIcon platform="mac" />
                 <h2 className="brand mt-4 text-3xl">Mac</h2>
                 <p className="muted mt-2 text-sm leading-relaxed">
-                  Apple Silicon · DMG · auto-updates · local llama.cpp runtime
+                  Apple Silicon · Terminal install · local llama.cpp runtime
                 </p>
               </div>
               <span className="download-badge download-badge--live">
@@ -104,13 +107,43 @@ export default async function DownloadPage() {
             <p className="muted mt-5 text-sm">
               Version {version} · AgentPilots-{version}-arm64.dmg
             </p>
+            <p className="muted mt-3 text-sm leading-relaxed">
+              The Mac build is unsigned until Apple notarization. Use Terminal
+              install so Gatekeeper does not treat the app as damaged. Sign in
+              with the same account as the web app to sync.
+            </p>
+            <div className="mt-5">
+              <DownloadCopyCommand command={macInstallCommand} />
+            </div>
             <a
-              className="btn mt-6 w-full sm:w-auto"
+              className="btn secondary mt-4 w-full sm:w-auto"
               href={macUrl}
               rel="noopener noreferrer"
             >
-              Download for Mac
+              Download DMG instead
             </a>
+            <details className="download-mac-fallback mt-5">
+              <summary className="muted cursor-pointer text-sm font-medium">
+                Already downloaded the DMG?
+              </summary>
+              <div className="muted mt-3 space-y-2 text-sm leading-relaxed">
+                <p>
+                  Drag AgentPilots into Applications, then run this in Terminal
+                  to clear quarantine and open:
+                </p>
+                <pre className="download-install__pre download-install__pre--inline">
+                  <code>
+                    {`xattr -cr /Applications/AgentPilots.app\nopen /Applications/AgentPilots.app`}
+                  </code>
+                </pre>
+                <p>
+                  After an auto-update, if macOS blocks the app again, re-run
+                  the install command or the{" "}
+                  <code className="download-inline-code">xattr</code> line
+                  above.
+                </p>
+              </div>
+            </details>
           </article>
         </section>
 
