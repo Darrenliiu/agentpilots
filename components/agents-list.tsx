@@ -53,20 +53,10 @@ export function AgentsList({
               Link agents
             </button>
           ) : null}
-          <div
-            className="inline-flex rounded-full border p-0.5"
-            style={{ borderColor: "var(--line)" }}
-            role="group"
-            aria-label="Layout"
-          >
+          <div className="pill-toggle" role="group" aria-label="Layout">
             <button
               type="button"
-              className="rounded-full px-3 py-1.5 text-sm font-semibold transition-colors"
-              style={
-                view === "row"
-                  ? { background: "var(--ink)", color: "#fff" }
-                  : { color: "var(--ink-muted)" }
-              }
+              className="pill-toggle__btn"
               aria-pressed={view === "row"}
               onClick={() => setView("row")}
             >
@@ -77,12 +67,7 @@ export function AgentsList({
             </button>
             <button
               type="button"
-              className="rounded-full px-3 py-1.5 text-sm font-semibold transition-colors"
-              style={
-                view === "grid"
-                  ? { background: "var(--ink)", color: "#fff" }
-                  : { color: "var(--ink-muted)" }
-              }
+              className="pill-toggle__btn"
               aria-pressed={view === "grid"}
               onClick={() => setView("grid")}
             >

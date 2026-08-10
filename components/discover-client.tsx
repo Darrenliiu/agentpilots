@@ -79,8 +79,7 @@ export function DiscoverClient({
           />
         </div>
         <div
-          className="inline-flex shrink-0 rounded-full border p-0.5"
-          style={{ borderColor: "var(--line)" }}
+          className="pill-toggle shrink-0"
           role="group"
           aria-label="Visibility filter"
         >
@@ -94,12 +93,7 @@ export function DiscoverClient({
             <button
               key={value}
               type="button"
-              className="rounded-full px-3 py-1.5 text-sm font-semibold transition-colors"
-              style={
-                filter === value
-                  ? { background: "var(--ink)", color: "#fff" }
-                  : { color: "var(--ink-muted)" }
-              }
+              className="pill-toggle__btn"
               aria-pressed={filter === value}
               onClick={() => setFilter(value)}
             >

@@ -255,22 +255,12 @@ export function CommunityUsagePanel({
           Token totals and cost estimates from agent runs. Estimates use public
           list prices and may differ from your provider bill.
         </p>
-        <div
-          className="inline-flex rounded-full border p-0.5"
-          style={{ borderColor: "var(--line)" }}
-          role="group"
-          aria-label="Date range"
-        >
+        <div className="pill-toggle" role="group" aria-label="Date range">
           {RANGES.map((r) => (
             <button
               key={r.days}
               type="button"
-              className="rounded-full px-3 py-1.5 text-sm font-semibold transition-colors"
-              style={
-                range === r.days
-                  ? { background: "var(--ink)", color: "#fff" }
-                  : { color: "var(--ink-muted)" }
-              }
+              className="pill-toggle__btn"
               aria-pressed={range === r.days}
               onClick={() => setRange(r.days)}
             >
