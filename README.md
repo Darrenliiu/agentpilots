@@ -53,6 +53,12 @@ npm run desktop:dev
 npm run desktop:dist
 ```
 
+On macOS Apple Silicon, build a local DMG:
+
+```bash
+npm run desktop:dist:mac
+```
+
 Bundled models are expected under `desktop/resources/models/`. Downloads go to the app userData `models/` folder. Manage them in **Local models** in the sidebar.
 
 ## Keeping desktop synced with web (auto-update + CI)
@@ -73,18 +79,18 @@ Web (Vercel) and desktop share this repo. Data stays synced through Supabase. **
 
 ```bash
 # bump version in package.json, commit, then:
-git tag v0.1.1
+git tag v0.1.2
 git push origin main
-git push origin v0.1.1
+git push origin v0.1.2
 ```
 
 Or run **Actions → Desktop Release → Run workflow**.
 
 CI will:
 
-1. Build Next standalone + Electron NSIS installer
-2. Publish `AgentPilots-Setup-<version>.exe`, `latest.yml`, and blockmap to a GitHub Release
-3. Upload the installer as a workflow artifact
+1. Build Next standalone + Electron installers on Windows and macOS (Apple Silicon)
+2. Publish `AgentPilots-Setup-<version>.exe`, `AgentPilots-<version>-arm64.dmg`, update YAMLs, and blockmaps to a GitHub Release
+3. Upload installers as workflow artifacts
 
 Installed apps check GitHub Releases on launch (and every 6 hours), download updates, and prompt to restart. A banner also appears in the desktop UI when an update is downloading or ready.
 
@@ -93,7 +99,8 @@ Installed apps check GitHub Releases on launch (and every 6 hours), download upd
 With `GH_TOKEN` set for a repo you can write releases to:
 
 ```bash
-npm run desktop:publish
+npm run desktop:publish        # Windows
+npm run desktop:publish:mac    # macOS (Apple Silicon)
 ```
 
 ## Supabase

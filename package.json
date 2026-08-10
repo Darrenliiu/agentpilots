@@ -16,7 +16,9 @@
     "desktop:fetch-models": "node desktop/scripts/fetch-runtime.mjs --models",
     "desktop:prepare": "node desktop/scripts/build-standalone.mjs",
     "desktop:dist": "npm run desktop:prepare && electron-builder --win --publish never",
-    "desktop:publish": "npm run desktop:prepare && electron-builder --win --publish always"
+    "desktop:publish": "npm run desktop:prepare && electron-builder --win --publish always",
+    "desktop:dist:mac": "npm run desktop:prepare && electron-builder --mac --arm64 --publish never",
+    "desktop:publish:mac": "npm run desktop:prepare && electron-builder --mac --arm64 --publish always"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.36",
@@ -79,7 +81,8 @@
           "**/*",
           "!README.md",
           "!.gitkeep",
-          "!*.zip"
+          "!*.zip",
+          "!*.tar.gz"
         ]
       },
       {
@@ -118,6 +121,29 @@
         "nsis"
       ],
       "artifactName": "AgentPilots-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "artifactName": "AgentPilots-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

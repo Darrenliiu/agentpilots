@@ -1,5 +1,8 @@
-# llama.cpp Windows runtime (x64)
+# llama.cpp runtime
 
-Run `npm run desktop:fetch-runtime` to download `llama-server.exe` and required DLLs here.
+Run `npm run desktop:fetch-runtime` on the target OS to download the matching binary here:
 
-Newer llama.cpp builds ship a small `llama-server.exe` stub plus `llama-server-impl.dll` and other DLLs — keep this whole folder intact when packaging.
+- **Windows x64** → `llama-server.exe` (+ DLLs)
+- **macOS Apple Silicon (arm64)** → `llama-server` (+ dylibs)
+
+Newer llama.cpp builds ship a small `llama-server` stub plus supporting libraries — keep this whole folder intact when packaging.

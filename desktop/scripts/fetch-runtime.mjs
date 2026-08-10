@@ -1,14 +1,23 @@
 #!/usr/bin/env node
 /**
- * Downloads llama-server (Windows x64) and optionally bundled GGUF models
- * into desktop/resources for local/desktop development and packaging.
+ * Downloads llama-server (Windows x64 or macOS arm64) and optionally bundled
+ * GGUF models into desktop/resources for local/desktop development and packaging.
  *
  * Usage:
  *   node desktop/scripts/fetch-runtime.mjs
  *   node desktop/scripts/fetch-runtime.mjs --models
  *   node desktop/scripts/fetch-runtime.mjs --models --all
  */
-import { createWriteStream, existsSync, mkdirSync, readdirSync, copyFileSync, readFileSync } from "fs";
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  copyFileSync,
+  readFileSync,
+  chmodSync,
+  unlinkSync,
+} from "fs";
 import http from "http";
 import https from "https";
 import path from "path";
@@ -28,6 +37,8 @@ const catalog = JSON.parse(
 const args = new Set(process.argv.slice(2));
 const wantModels = args.has("--models");
 const wantAllModels = args.has("--all");
+
+const LLAMA_TAG = process.env.LLAMA_CPP_TAG || "b10278";
 
 function download(url, dest) {
   return new Promise((resolve, reject) => {
@@ -90,58 +101,125 @@ function walkFind(dir, name) {
   return null;
 }
 
-async function fetchLlamaServer() {
-  mkdirSync(llamaDir, { recursive: true });
-  const exe = path.join(llamaDir, "llama-server.exe");
-  if (existsSync(exe)) {
-    console.log("llama-server.exe already present");
+function extractArchive(archivePath, destDir) {
+  if (process.platform === "win32") {
+    if (archivePath.endsWith(".tar.gz") || archivePath.endsWith(".tgz")) {
+      execFileSync(
+        "tar",
+        ["-xzf", archivePath, "-C", destDir],
+        { stdio: "inherit" },
+      );
+      return;
+    }
+    execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        `Expand-Archive -Path '${archivePath.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`,
+      ],
+      { stdio: "inherit" },
+    );
     return;
   }
 
-  const tag = process.env.LLAMA_CPP_TAG || "b10278";
-  const zipName = `llama-${tag}-bin-win-cpu-x64.zip`;
-  const url = `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/${zipName}`;
-  const zipPath = path.join(llamaDir, zipName);
+  if (archivePath.endsWith(".zip")) {
+    execFileSync("unzip", ["-o", archivePath, "-d", destDir], {
+      stdio: "inherit",
+    });
+    return;
+  }
 
-  console.log(`Downloading llama.cpp ${tag}...`);
+  execFileSync("tar", ["-xzf", archivePath, "-C", destDir], {
+    stdio: "inherit",
+  });
+}
+
+function resolveRuntimeTarget() {
+  if (process.platform === "win32") {
+    return {
+      id: "win-x64",
+      binaryName: "llama-server.exe",
+      archiveName: `llama-${LLAMA_TAG}-bin-win-cpu-x64.zip`,
+    };
+  }
+  if (process.platform === "darwin") {
+    if (process.arch !== "arm64") {
+      console.warn(
+        `macOS ${process.arch} is not supported yet (Apple Silicon arm64 only).`,
+      );
+      return null;
+    }
+    return {
+      id: "mac-arm64",
+      binaryName: "llama-server",
+      archiveName: `llama-${LLAMA_TAG}-bin-macos-arm64.tar.gz`,
+    };
+  }
+  console.warn(
+    `Unsupported platform ${process.platform}/${process.arch}. Place llama-server manually in ${llamaDir}`,
+  );
+  return null;
+}
+
+async function fetchLlamaServer() {
+  mkdirSync(llamaDir, { recursive: true });
+  const target = resolveRuntimeTarget();
+  if (!target) return;
+
+  const binaryPath = path.join(llamaDir, target.binaryName);
+  if (existsSync(binaryPath)) {
+    console.log(`${target.binaryName} already present`);
+    return;
+  }
+
+  const url = `https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/${target.archiveName}`;
+  const archivePath = path.join(llamaDir, target.archiveName);
+
+  console.log(`Downloading llama.cpp ${LLAMA_TAG} (${target.id})...`);
   try {
-    await download(url, zipPath);
+    await download(url, archivePath);
   } catch (err) {
     console.warn(
-      `Failed to download ${url}. Place llama-server.exe manually in ${llamaDir}`,
+      `Failed to download ${url}. Place ${target.binaryName} manually in ${llamaDir}`,
     );
     console.warn(String(err));
     return;
   }
 
   try {
-    if (process.platform === "win32") {
-      execFileSync(
-        "powershell.exe",
-        [
-          "-NoProfile",
-          "-Command",
-          `Expand-Archive -Path '${zipPath.replace(/'/g, "''")}' -DestinationPath '${llamaDir.replace(/'/g, "''")}' -Force`,
-        ],
-        { stdio: "inherit" },
-      );
-    } else {
-      execFileSync("unzip", ["-o", zipPath, "-d", llamaDir], { stdio: "inherit" });
-    }
+    extractArchive(archivePath, llamaDir);
   } catch (err) {
-    console.warn("Failed to unzip llama.cpp release:", err);
+    console.warn("Failed to extract llama.cpp release:", err);
     return;
   }
 
-  const found = walkFind(llamaDir, "llama-server.exe");
-  if (found && path.resolve(found) !== path.resolve(exe)) {
-    copyFileSync(found, exe);
+  const found = walkFind(llamaDir, target.binaryName);
+  if (found && path.resolve(found) !== path.resolve(binaryPath)) {
+    copyFileSync(found, binaryPath);
   }
-  if (!existsSync(exe)) {
-    console.warn(`Could not locate llama-server.exe after extract. Check ${llamaDir}`);
-  } else {
-    console.log("Installed", exe);
+  if (!existsSync(binaryPath)) {
+    console.warn(
+      `Could not locate ${target.binaryName} after extract. Check ${llamaDir}`,
+    );
+    return;
   }
+
+  if (process.platform !== "win32") {
+    try {
+      chmodSync(binaryPath, 0o755);
+    } catch {
+      // best-effort; packaging/CI may still set executable bit
+    }
+  }
+
+  try {
+    unlinkSync(archivePath);
+  } catch {
+    // keep archive if delete fails
+  }
+
+  console.log("Installed", binaryPath);
 }
 
 async function fetchModels() {

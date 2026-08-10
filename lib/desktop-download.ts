@@ -1,7 +1,7 @@
 const DEFAULT_GITHUB_REPO = "Darrenliiu/agentpilots";
 
 export function getDesktopVersionLabel() {
-  return process.env.NEXT_PUBLIC_DESKTOP_VERSION?.trim() || "0.1.1";
+  return process.env.NEXT_PUBLIC_DESKTOP_VERSION?.trim() || "0.1.2";
 }
 
 function getGithubRepo() {
@@ -22,7 +22,12 @@ export function getWindowsDownloadUrl() {
   return `https://github.com/${repo}/releases/latest/download/AgentPilots-Setup-${version}.exe`;
 }
 
-/** Public macOS installer URL when a DMG/ZIP is published. */
+/** Public macOS Apple Silicon DMG URL (explicit env or GitHub Releases default). */
 export function getMacDownloadUrl() {
-  return process.env.NEXT_PUBLIC_DESKTOP_MAC_URL?.trim() || null;
+  const explicit = process.env.NEXT_PUBLIC_DESKTOP_MAC_URL?.trim();
+  if (explicit) return explicit;
+
+  const version = getDesktopVersionLabel();
+  const repo = getGithubRepo();
+  return `https://github.com/${repo}/releases/latest/download/AgentPilots-${version}-arm64.dmg`;
 }

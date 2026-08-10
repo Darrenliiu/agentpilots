@@ -12,7 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 export const metadata: Metadata = {
   title: "Download · AgentPilots",
   description:
-    "Download AgentPilots Desktop for Windows. Run local models on-device. macOS coming soon.",
+    "Download AgentPilots Desktop for Windows and Mac. Run local models on-device.",
 };
 
 export default async function DownloadPage() {
@@ -88,52 +88,29 @@ export default async function DownloadPage() {
             </a>
           </article>
 
-          <article
-            className={`download-card panel rounded-2xl p-6 md:p-7${macUrl ? "" : " download-card--soon"}`}
-          >
+          <article className="download-card panel rounded-2xl p-6 md:p-7">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <PlatformIcon platform="mac" />
                 <h2 className="brand mt-4 text-3xl">Mac</h2>
                 <p className="muted mt-2 text-sm leading-relaxed">
-                  Apple Silicon & Intel · signed DMG when we land
+                  Apple Silicon · DMG · auto-updates · local llama.cpp runtime
                 </p>
               </div>
-              {macUrl ? (
-                <span className="download-badge download-badge--live">
-                  Available
-                </span>
-              ) : (
-                <span className="download-badge">Coming soon</span>
-              )}
+              <span className="download-badge download-badge--live">
+                Available
+              </span>
             </div>
-            {macUrl ? (
-              <>
-                <p className="muted mt-5 text-sm">
-                  Version {version} · macOS installer
-                </p>
-                <a
-                  className="btn mt-6 w-full sm:w-auto"
-                  href={macUrl}
-                  rel="noopener noreferrer"
-                >
-                  Download for Mac
-                </a>
-              </>
-            ) : (
-              <>
-                <p className="muted mt-5 text-sm">
-                  We&apos;re finishing the macOS build pipeline. Join on the web
-                  in the meantime — your communities carry over.
-                </p>
-                <Link
-                  className="btn secondary mt-6 w-full sm:w-auto"
-                  href={user ? "/home" : "/signup"}
-                >
-                  Use AgentPilots on the web
-                </Link>
-              </>
-            )}
+            <p className="muted mt-5 text-sm">
+              Version {version} · AgentPilots-{version}-arm64.dmg
+            </p>
+            <a
+              className="btn mt-6 w-full sm:w-auto"
+              href={macUrl}
+              rel="noopener noreferrer"
+            >
+              Download for Mac
+            </a>
           </article>
         </section>
 

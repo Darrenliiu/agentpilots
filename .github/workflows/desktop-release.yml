@@ -1,13 +1,13 @@
 name: Desktop Release
 
-# Builds the Windows installer and publishes a GitHub Release so
+# Builds Windows + macOS installers and publishes a GitHub Release so
 # electron-updater can auto-update installed desktop apps.
 #
 # Trigger:
-#   - Push a version tag: git tag v0.1.1 && git push origin v0.1.1
-#   - Or run manually from Actions ΓåÆ Desktop Release
+#   - Push a version tag: git tag v0.1.2 && git push origin v0.1.2
+#   - Or run manually from Actions → Desktop Release
 #
-# Required repository secrets (Settings ΓåÆ Secrets ΓåÆ Actions):
+# Required repository secrets (Settings → Secrets → Actions):
 #   NEXT_PUBLIC_SUPABASE_URL
 #   NEXT_PUBLIC_SUPABASE_ANON_KEY
 #   SUPABASE_SERVICE_ROLE_KEY          (used at runtime; baked into build env for standalone)
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Optional tag/version override (e.g. 0.1.1). Leave empty to use package.json."
+        description: "Optional tag/version override (e.g. 0.1.2). Leave empty to use package.json."
         required: false
         type: string
 
@@ -33,7 +33,28 @@ concurrency:
 
 jobs:
   release:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            publish_script: desktop:publish
+            llama_cache_key: llama-runtime-win-b10278
+            artifact_globs: |
+              desktop/dist/AgentPilots-Setup-*.exe
+              desktop/dist/latest.yml
+              desktop/dist/*.blockmap
+          - os: macos-latest
+            platform: mac
+            publish_script: desktop:publish:mac
+            llama_cache_key: llama-runtime-mac-arm64-b10278
+            artifact_globs: |
+              desktop/dist/AgentPilots-*-arm64.dmg
+              desktop/dist/latest-mac.yml
+              desktop/dist/*.blockmap
+
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 180
 
     steps:
@@ -73,13 +94,13 @@ jobs:
           };
           fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
           NODE
-          echo "Publishing desktop version $VERSION to $GITHUB_REPOSITORY"
+          echo "Publishing desktop version $VERSION (${{ matrix.platform }}) to $GITHUB_REPOSITORY"
 
       - name: Cache llama.cpp runtime
         uses: actions/cache@v4
         with:
           path: desktop/resources/llama
-          key: llama-runtime-win-b10278-${{ hashFiles('desktop/scripts/fetch-runtime.mjs') }}
+          key: ${{ matrix.llama_cache_key }}-${{ hashFiles('desktop/scripts/fetch-runtime.mjs') }}
 
       - name: Cache bundled GGUF models
         uses: actions/cache@v4
@@ -102,24 +123,26 @@ jobs:
             echo "AGENTPILOTS_ENCRYPTION_KEY=${{ secrets.AGENTPILOTS_ENCRYPTION_KEY }}"
           } > .env.local
 
-      - name: Verify icon exists
+      - name: Verify Windows icon exists
+        if: matrix.platform == 'win'
         shell: bash
         run: test -f desktop/build/icon.ico
 
-      - name: Build and publish Windows installer
+      - name: Verify Mac icon source exists
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: test -f desktop/build/icon-source.png || test -f desktop/build/icon.ico
+
+      - name: Build and publish installer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # electron-builder publishes to the current GitHub repo
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: npm run desktop:publish
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run ${{ matrix.publish_script }}
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AgentPilots-Setup-${{ steps.version.outputs.version }}
-          path: |
-            desktop/dist/AgentPilots-Setup-*.exe
-            desktop/dist/latest.yml
-            desktop/dist/*.blockmap
+          name: AgentPilots-${{ matrix.platform }}-${{ steps.version.outputs.version }}
+          path: ${{ matrix.artifact_globs }}
           if-no-files-found: error
           retention-days: 14
