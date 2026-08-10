@@ -632,9 +632,21 @@ export async function createInviteAction(communityId: string, formData: FormData
 }
 
 /** Any community member can copy a share link; reuses an open reusable invite when possible. */
-export async function getOrCreateCommunityShareLinkAction(communityId: string) {
+export async function getOrCreateCommunityShareLinkAction(
+  communityId: string,
+): Promise<
+  | { error: string }
+  | {
+      path: string;
+      url: string;
+      inviteId: string;
+      expiresAt: string | null;
+    }
+> {
   const auth = await requireCommunityMember(communityId);
-  if ("error" in auth) return { error: auth.error };
+  if ("error" in auth) {
+    return { error: auth.error || "Not a community member" };
+  }
 
   const { supabase, user } = auth;
 
@@ -649,9 +661,10 @@ export async function getOrCreateCommunityShareLinkAction(communityId: string) {
   const existing = (existingRows || []).find(isActiveShareInvite);
 
   if (existing?.token) {
+    const token = existing.token as string;
     return {
-      path: `/join/${existing.token}` as const,
-      url: absoluteJoinUrl(existing.token),
+      path: `/join/${token}`,
+      url: absoluteJoinUrl(token),
       inviteId: existing.id as string,
       expiresAt: (existing.expires_at as string | null) ?? null,
     };
@@ -671,8 +684,9 @@ export async function getOrCreateCommunityShareLinkAction(communityId: string) {
     .select("id, token, expires_at")
     .single();
   if (error) return { error: error.message };
+  if (!data?.token) return { error: "Could not create invite link" };
   return {
-    path: `/join/${data.token}` as const,
+    path: `/join/${data.token}`,
     url: absoluteJoinUrl(data.token),
     inviteId: data.id as string,
     expiresAt: (data.expires_at as string | null) ?? null,

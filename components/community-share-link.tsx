@@ -100,12 +100,8 @@ export function CommunityShareLinkPanel({
     if (path) return;
     start(async () => {
       const res = await getOrCreateCommunityShareLinkAction(communityId);
-      if (res && "error" in res && res.error) {
-        setError(res.error);
-        return;
-      }
-      if (!("path" in res) || !res.path) {
-        setError("Could not create invite link");
+      if (!res || "error" in res) {
+        setError(res?.error || "Could not create invite link");
         return;
       }
       setPath(res.path);
@@ -116,7 +112,7 @@ export function CommunityShareLinkPanel({
   }, [communityId, path]);
 
   function applyResult(res: {
-    path?: `/join/${string}`;
+    path?: string;
     expiresAt?: string | null;
     error?: string;
   }) {

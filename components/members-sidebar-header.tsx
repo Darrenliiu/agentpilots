@@ -97,15 +97,11 @@ function InviteMembersDialog({
     if (link) return;
     start(async () => {
       const res = await getOrCreateCommunityShareLinkAction(communityId);
-      if (res && "error" in res && res.error) {
-        setError(res.error);
+      if (!res || "error" in res) {
+        setError(res?.error || "Could not create invite link");
         return;
       }
-      if (!("path" in res) || !res.path) {
-        setError("Could not create invite link");
-        return;
-      }
-      setLink(("url" in res && res.url) || absoluteShareUrl(res.path));
+      setLink(res.url || absoluteShareUrl(res.path));
     });
   }, [open, communityId, link]);
 

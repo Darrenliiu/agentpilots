@@ -240,15 +240,11 @@ function CommunityShareLink({ communityId }: { communityId: string }) {
       let url = link;
       if (!url) {
         const res = await getOrCreateCommunityShareLinkAction(communityId);
-        if (res && "error" in res && res.error) {
-          setError(res.error);
+        if (!res || "error" in res) {
+          setError(res?.error || "Could not create invite link");
           return;
         }
-        if (!("path" in res) || !res.path) {
-          setError("Could not create invite link");
-          return;
-        }
-        url = ("url" in res && res.url) || absoluteShareUrl(res.path);
+        url = res.url || absoluteShareUrl(res.path);
         setLink(url);
       }
       if (thenCopy && url) {
