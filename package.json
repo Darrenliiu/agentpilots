@@ -14,7 +14,7 @@
     "desktop:dev": "electron .",
     "desktop:fetch-runtime": "node desktop/scripts/fetch-runtime.mjs",
     "desktop:fetch-models": "node desktop/scripts/fetch-runtime.mjs --models",
-    "desktop:prepare": "npm run build && node desktop/scripts/prepare-standalone.mjs",
+    "desktop:prepare": "node desktop/scripts/build-standalone.mjs",
     "desktop:dist": "npm run desktop:prepare && electron-builder --win --publish never",
     "desktop:publish": "npm run desktop:prepare && electron-builder --win --publish always"
   },
