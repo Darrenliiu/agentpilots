@@ -1,0 +1,131 @@
+{
+  "name": "agentpilots",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multiplayer communities with people and AI agents in the same channels",
+  "author": "AgentPilots",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "desktop": "electron .",
+    "desktop:dev": "electron .",
+    "desktop:fetch-runtime": "node desktop/scripts/fetch-runtime.mjs",
+    "desktop:fetch-models": "node desktop/scripts/fetch-runtime.mjs --models",
+    "desktop:prepare": "npm run build && node desktop/scripts/prepare-standalone.mjs",
+    "desktop:dist": "npm run desktop:prepare && electron-builder --win --publish never",
+    "desktop:publish": "npm run desktop:prepare && electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.36",
+    "@ai-sdk/google": "^4.0.39",
+    "@ai-sdk/mcp": "^2.0.29",
+    "@ai-sdk/openai": "^4.0.36",
+    "@ai-sdk/xai": "^4.0.33",
+    "@supabase/ssr": "^0.12.4",
+    "@supabase/supabase-js": "^2.112.2",
+    "ai": "^7.0.58",
+    "date-fns": "^4.4.0",
+    "electron-updater": "^6.8.9",
+    "mermaid": "^11.16.1",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-sanitize": "^6.0.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1",
+    "uuid": "^14.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/uuid": "^10.0.0",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "build": {
+    "appId": "ai.agentpilots.desktop",
+    "productName": "AgentPilots",
+    "directories": {
+      "output": "desktop/dist",
+      "buildResources": "desktop/build"
+    },
+    "files": [
+      "desktop/main.cjs",
+      "desktop/preload.cjs",
+      "desktop/model-manager.cjs",
+      "desktop/auto-updater.cjs",
+      "desktop/model-catalog.json",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "desktop/resources/llama",
+        "to": "llama",
+        "filter": [
+          "**/*",
+          "!README.md",
+          "!.gitkeep",
+          "!*.zip"
+        ]
+      },
+      {
+        "from": "desktop/resources/models",
+        "to": "models",
+        "filter": [
+          "**/*",
+          "!README.md",
+          "!.gitkeep"
+        ]
+      },
+      {
+        "from": ".next/standalone",
+        "to": "app-standalone",
+        "filter": [
+          "**/*",
+          "!node_modules",
+          "!node_modules/**"
+        ]
+      },
+      {
+        "from": ".next/standalone/node_modules",
+        "to": "app-standalone/node_modules"
+      },
+      {
+        "from": ".next/static",
+        "to": "app-standalone/.next/static"
+      },
+      {
+        "from": "public",
+        "to": "app-standalone/public"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "AgentPilots-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

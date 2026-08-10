@@ -1,0 +1,374 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import type { Agent, CommunityConnector, Skill } from "@/lib/types";
+
+export type ComposerAttachment = {
+  connectorIds: string[];
+  skillIds: string[];
+  imageAgentId: string | null;
+};
+
+type MenuView = "root" | "image" | "skills" | "connectors";
+
+function MenuIcon({ kind }: { kind: "image" | "skills" | "connectors" }) {
+  if (kind === "image") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="9" cy="10" r="1.5" fill="currentColor" />
+        <path d="M4 16l5-4 3 2 4-5 4 7" stroke="currentColor" strokeWidth="1.5" fill="none" />
+      </svg>
+    );
+  }
+  if (kind === "skills") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M5 4h6a2 2 0 012 2v14l-3-2-3 2V6a2 2 0 00-2-2z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        <path
+          d="M13 4h6a2 2 0 012 2v14l-3-2-3 2V6a2 2 0 00-2-2z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M8 12h8M12 8v8M7 7l2 2M17 7l-2 2M7 17l2-2M17 17l-2-2"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+export function ComposerPlusMenu({
+  agents,
+  connectors,
+  skills,
+  connectedConnectorIds,
+  communitySlug,
+  value,
+  onChange,
+}: {
+  agents: Agent[];
+  connectors: CommunityConnector[];
+  skills: Skill[];
+  connectedConnectorIds: string[];
+  communitySlug: string;
+  value: ComposerAttachment;
+  onChange: (next: ComposerAttachment) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<MenuView>("root");
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const mediaAgents = agents.filter(
+    (a) => a.status === "active" && (a.kind === "image" || a.kind === "video"),
+  );
+  const enabledConnectors = connectors.filter((c) => c.enabled);
+  const enabledSkills = skills.filter((s) => s.enabled);
+  const connectedSet = new Set(connectedConnectorIds);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+        setView("root");
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  function toggleSkill(id: string) {
+    const set = new Set(value.skillIds);
+    if (set.has(id)) set.delete(id);
+    else set.add(id);
+    onChange({ ...value, skillIds: [...set] });
+  }
+
+  function toggleConnector(id: string) {
+    if (!connectedSet.has(id)) return;
+    const set = new Set(value.connectorIds);
+    if (set.has(id)) set.delete(id);
+    else set.add(id);
+    onChange({ ...value, connectorIds: [...set] });
+  }
+
+  function selectImageAgent(id: string) {
+    onChange({
+      ...value,
+      imageAgentId: value.imageAgentId === id ? null : id,
+    });
+    setOpen(false);
+    setView("root");
+  }
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        className="composer-plus-btn"
+        aria-label="Add attachment"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen((o) => !o);
+          setView("root");
+        }}
+      >
+        <span aria-hidden>+</span>
+      </button>
+
+      {open ? (
+        <div
+          className="absolute bottom-full left-0 z-20 mb-2 w-64 overflow-hidden rounded-xl border shadow-lg"
+          style={{
+            borderColor: "var(--line)",
+            background: "var(--chip-bg)",
+            color: "var(--ink)",
+          }}
+        >
+          {view === "root" ? (
+            <ul className="py-1 text-sm">
+              <li>
+                <button
+                  type="button"
+                  className="nav-hover flex w-full items-center gap-2 px-3 py-2 text-left"
+                  onClick={() => setView("image")}
+                >
+                  <MenuIcon kind="image" />
+                  <span className="flex-1">Image</span>
+                  <span className="muted">›</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className="nav-hover flex w-full items-center gap-2 px-3 py-2 text-left"
+                  onClick={() => setView("skills")}
+                >
+                  <MenuIcon kind="skills" />
+                  <span className="flex-1">Skills</span>
+                  <span className="muted">›</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className="nav-hover flex w-full items-center gap-2 px-3 py-2 text-left"
+                  onClick={() => setView("connectors")}
+                >
+                  <MenuIcon kind="connectors" />
+                  <span className="flex-1">Connectors</span>
+                  <span className="muted">›</span>
+                </button>
+              </li>
+            </ul>
+          ) : null}
+
+          {view === "image" ? (
+            <div>
+              <button
+                type="button"
+                className="muted w-full px-3 py-2 text-left text-xs"
+                onClick={() => setView("root")}
+              >
+                ← Back
+              </button>
+              {mediaAgents.length === 0 ? (
+                <p className="muted px-3 py-2 text-sm">
+                  No image/video agents in this channel.
+                </p>
+              ) : (
+                mediaAgents.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className="nav-hover flex w-full items-center justify-between px-3 py-2 text-left text-sm"
+                    onClick={() => selectImageAgent(a.id)}
+                  >
+                    <span>{a.name}</span>
+                    <span className="muted text-xs capitalize">{a.kind}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {view === "skills" ? (
+            <div className="max-h-64 overflow-y-auto">
+              <button
+                type="button"
+                className="muted w-full px-3 py-2 text-left text-xs"
+                onClick={() => setView("root")}
+              >
+                ← Back
+              </button>
+              {enabledSkills.length === 0 ? (
+                <p className="muted px-3 py-2 text-sm">
+                  No skills enabled.{" "}
+                  <a
+                    className="underline"
+                    href={`/c/${communitySlug}/settings/skills`}
+                  >
+                    Add skills
+                  </a>
+                </p>
+              ) : (
+                enabledSkills.map((s) => (
+                  <label
+                    key={s.id}
+                    className="nav-hover flex cursor-pointer items-center gap-2 px-3 py-2 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={value.skillIds.includes(s.id)}
+                      onChange={() => toggleSkill(s.id)}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {view === "connectors" ? (
+            <div className="max-h-64 overflow-y-auto">
+              <button
+                type="button"
+                className="muted w-full px-3 py-2 text-left text-xs"
+                onClick={() => setView("root")}
+              >
+                ← Back
+              </button>
+              {enabledConnectors.length === 0 ? (
+                <p className="muted px-3 py-2 text-sm">
+                  No connectors enabled.{" "}
+                  <a
+                    className="underline"
+                    href={`/c/${communitySlug}/settings/connectors`}
+                  >
+                    Enable connectors
+                  </a>
+                </p>
+              ) : (
+                enabledConnectors.map((c) => {
+                  const connected = connectedSet.has(c.id);
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center gap-2 px-3 py-2 text-sm"
+                    >
+                      {connected ? (
+                        <label className="nav-hover flex flex-1 cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={value.connectorIds.includes(c.id)}
+                            onChange={() => toggleConnector(c.id)}
+                          />
+                          <span className="truncate">{c.name}</span>
+                        </label>
+                      ) : (
+                        <>
+                          <span className="muted flex-1 truncate">{c.name}</span>
+                          <a
+                            className="text-xs underline"
+                            href={`/c/${communitySlug}/settings/connectors`}
+                          >
+                            Connect
+                          </a>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function ComposerChips({
+  agents,
+  connectors,
+  skills,
+  value,
+  onChange,
+}: {
+  agents: Agent[];
+  connectors: CommunityConnector[];
+  skills: Skill[];
+  value: ComposerAttachment;
+  onChange: (next: ComposerAttachment) => void;
+}) {
+  const chips: { key: string; label: string; onRemove: () => void }[] = [];
+
+  if (value.imageAgentId) {
+    const agent = agents.find((a) => a.id === value.imageAgentId);
+    chips.push({
+      key: `img-${value.imageAgentId}`,
+      label: agent ? `Image: ${agent.name}` : "Image agent",
+      onRemove: () => onChange({ ...value, imageAgentId: null }),
+    });
+  }
+
+  for (const id of value.skillIds) {
+    const skill = skills.find((s) => s.id === id);
+    chips.push({
+      key: `skill-${id}`,
+      label: skill ? `Skill: ${skill.name}` : "Skill",
+      onRemove: () =>
+        onChange({
+          ...value,
+          skillIds: value.skillIds.filter((x) => x !== id),
+        }),
+    });
+  }
+
+  for (const id of value.connectorIds) {
+    const c = connectors.find((x) => x.id === id);
+    chips.push({
+      key: `conn-${id}`,
+      label: c ? `Connector: ${c.name}` : "Connector",
+      onRemove: () =>
+        onChange({
+          ...value,
+          connectorIds: value.connectorIds.filter((x) => x !== id),
+        }),
+    });
+  }
+
+  if (!chips.length) return null;
+
+  return (
+    <div className="mb-2 flex flex-wrap gap-2">
+      {chips.map((chip) => (
+        <button
+          key={chip.key}
+          type="button"
+          className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs"
+          style={{ borderColor: "var(--line)" }}
+          onClick={chip.onRemove}
+          title="Remove"
+        >
+          {chip.label}
+          <span className="muted" aria-hidden>
+            ×
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}

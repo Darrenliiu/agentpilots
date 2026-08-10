@@ -1,0 +1,125 @@
+name: Desktop Release
+
+# Builds the Windows installer and publishes a GitHub Release so
+# electron-updater can auto-update installed desktop apps.
+#
+# Trigger:
+#   - Push a version tag: git tag v0.1.1 && git push origin v0.1.1
+#   - Or run manually from Actions → Desktop Release
+#
+# Required repository secrets (Settings → Secrets → Actions):
+#   NEXT_PUBLIC_SUPABASE_URL
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY
+#   SUPABASE_SERVICE_ROLE_KEY          (used at runtime; baked into build env for standalone)
+#   AGENTPILOTS_ENCRYPTION_KEY
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional tag/version override (e.g. 0.1.1). Leave empty to use package.json."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            VERSION="${{ inputs.tag }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          node <<'NODE'
+          const fs = require("fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+          pkg.repository = {
+            type: "git",
+            url: `https://github.com/${owner}/${repo}.git`,
+          };
+          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          NODE
+          echo "Publishing desktop version $VERSION to $GITHUB_REPOSITORY"
+
+      - name: Cache llama.cpp runtime
+        uses: actions/cache@v4
+        with:
+          path: desktop/resources/llama
+          key: llama-runtime-win-b10278-${{ hashFiles('desktop/scripts/fetch-runtime.mjs') }}
+
+      - name: Cache bundled GGUF models
+        uses: actions/cache@v4
+        with:
+          path: desktop/resources/models
+          key: gguf-bundled-${{ hashFiles('desktop/model-catalog.json') }}
+
+      - name: Fetch llama-server + bundled models
+        run: |
+          npm run desktop:fetch-runtime
+          npm run desktop:fetch-models
+
+      - name: Write build env
+        shell: bash
+        run: |
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}"
+            echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+            echo "AGENTPILOTS_ENCRYPTION_KEY=${{ secrets.AGENTPILOTS_ENCRYPTION_KEY }}"
+          } > .env.local
+
+      - name: Verify icon exists
+        shell: bash
+        run: test -f desktop/build/icon.ico
+
+      - name: Build and publish Windows installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder publishes to the current GitHub repo
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run desktop:publish
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentPilots-Setup-${{ steps.version.outputs.version }}
+          path: |
+            desktop/dist/AgentPilots-Setup-*.exe
+            desktop/dist/latest.yml
+            desktop/dist/*.blockmap
+          if-no-files-found: error
+          retention-days: 14

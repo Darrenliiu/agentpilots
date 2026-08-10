@@ -1,0 +1,50 @@
+{
+  "defaultModelId": "qwen2.5-1.5b-instruct",
+  "llamaPort": 11435,
+  "models": [
+    {
+      "id": "qwen2.5-1.5b-instruct",
+      "label": "Qwen2.5 1.5B Instruct",
+      "filename": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "sizeBytes": 1117320736,
+      "minRamGb": 4,
+      "license": "Apache-2.0",
+      "bundled": true,
+      "description": "Fast on-device default. Good for light agents."
+    },
+    {
+      "id": "llama-3.2-1b-instruct",
+      "label": "Llama 3.2 1B Instruct",
+      "filename": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "sizeBytes": 807694464,
+      "minRamGb": 4,
+      "license": "Llama 3.2 Community License",
+      "bundled": true,
+      "description": "Small Meta instruct model for local replies."
+    },
+    {
+      "id": "qwen2.5-7b-instruct",
+      "label": "Qwen2.5 7B Instruct",
+      "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
+      "sizeBytes": 4680000000,
+      "minRamGb": 10,
+      "license": "Apache-2.0",
+      "bundled": false,
+      "description": "Stronger local quality. Download required (~4.7 GB)."
+    },
+    {
+      "id": "llama-3.1-8b-instruct",
+      "label": "Llama 3.1 8B Instruct",
+      "filename": "Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+      "sizeBytes": 4920000000,
+      "minRamGb": 12,
+      "license": "Llama 3.1 Community License",
+      "bundled": false,
+      "description": "Larger Meta instruct model. Download required (~4.9 GB)."
+    }
+  ]
+}
