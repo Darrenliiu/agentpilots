@@ -84,6 +84,32 @@ export type Agent = {
   handoff_prompt_assist?: boolean;
 };
 
+export type AgentRunStatus = "pending" | "running" | "succeeded" | "failed";
+export type AgentRunPhase =
+  | "thinking"
+  | "tool"
+  | "reasoning"
+  | "generating"
+  | "sending"
+  | "done"
+  | "failed";
+
+export type AgentRun = {
+  id: string;
+  message_id: string;
+  agent_id: string;
+  channel_id: string | null;
+  community_id: string | null;
+  status: AgentRunStatus;
+  phase: AgentRunPhase | null;
+  status_text: string | null;
+  error: string | null;
+  result_message_id: string | null;
+  created_at: string;
+  updated_at: string;
+  agent?: Pick<Agent, "id" | "name" | "avatar_url"> | null;
+};
+
 export type Invite = {
   id: string;
   community_id: string;

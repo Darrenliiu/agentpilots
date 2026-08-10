@@ -14,8 +14,10 @@ import {
 import { ensureLocalModelActive } from "@/lib/local-llm";
 import { formatSkillsForSystemPrompt } from "@/lib/skills/parse";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { AgentProgressUpdate } from "@/lib/agents/providers";
 import type {
   Agent,
+  AgentRunPhase,
   CommunityConnector,
   HandoffMetadata,
   Message,
@@ -103,11 +105,16 @@ async function runTargetAgents(opts: {
       .insert({
         message_id: message.id,
         agent_id: agent.id,
+        channel_id: channel.id,
+        community_id: channel.community_id,
         status: "running",
+        phase: "thinking",
+        status_text: "Thinking…",
       })
       .select("*")
       .single();
 
+    const publishProgress = createRunProgressPublisher(admin, run?.id ?? null);
     const closers: Array<() => Promise<void>> = [];
 
     try {
@@ -196,6 +203,7 @@ async function runTargetAgents(opts: {
           userPrompt: prompt,
           history,
           tools: Object.keys(tools).length ? tools : undefined,
+          onProgress: publishProgress,
         });
 
         const allWarnings = [...toolWarnings, ...result.warnings];
@@ -211,10 +219,19 @@ async function runTargetAgents(opts: {
           metadata.usage = result.usage;
         }
       } else {
+        await publishProgress({
+          phase: "generating",
+          statusText: "Generating image",
+        });
         const media = await generateAgentMediaReply({ agent, apiKey, prompt });
         body = media.body;
         metadata = { ...metadata, ...media.metadata };
       }
+
+      await publishProgress({
+        phase: "sending",
+        statusText: "Sending message",
+      });
 
       const { data: reply, error: replyErr } = await admin
         .from("messages")
@@ -234,6 +251,8 @@ async function runTargetAgents(opts: {
           .from("agent_runs")
           .update({
             status: "succeeded",
+            phase: "done",
+            status_text: null,
             result_message_id: reply.id,
           })
           .eq("id", run.id);
@@ -256,7 +275,12 @@ async function runTargetAgents(opts: {
       if (run) {
         await admin
           .from("agent_runs")
-          .update({ status: "failed", error })
+          .update({
+            status: "failed",
+            phase: "failed",
+            status_text: null,
+            error,
+          })
           .eq("id", run.id);
       }
       await admin.from("messages").insert({
@@ -368,6 +392,40 @@ async function continueHandoffsFromReply(opts: {
     authorId,
     handoffIncoming: handoffMeta,
   });
+}
+
+function createRunProgressPublisher(
+  admin: AdminClient,
+  runId: string | null,
+): (update: AgentProgressUpdate) => Promise<void> {
+  if (!runId) return async () => {};
+
+  let lastPhase: AgentRunPhase | null = null;
+  let lastText: string | null = null;
+  let chain: Promise<void> = Promise.resolve();
+
+  return async (update: AgentProgressUpdate) => {
+    if (update.phase === lastPhase && update.statusText === lastText) return;
+    lastPhase = update.phase;
+    lastText = update.statusText;
+
+    chain = chain
+      .then(async () => {
+        await admin
+          .from("agent_runs")
+          .update({
+            phase: update.phase,
+            status_text: update.statusText,
+          })
+          .eq("id", runId)
+          .eq("status", "running");
+      })
+      .catch(() => {
+        // Progress is best-effort; never fail the agent run for UI updates.
+      });
+
+    await chain;
+  };
 }
 
 async function loadChannelAgents(

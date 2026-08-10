@@ -2,8 +2,8 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createXai } from "@ai-sdk/xai";
-import { generateText, stepCountIs, type ToolSet } from "ai";
-import type { Agent } from "@/lib/types";
+import { stepCountIs, streamText, type ToolSet } from "ai";
+import type { Agent, AgentRunPhase } from "@/lib/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type AgentTokenUsage = {
@@ -11,6 +11,31 @@ export type AgentTokenUsage = {
   outputTokens: number | null;
   totalTokens: number | null;
 };
+
+export type AgentProgressUpdate = {
+  phase: AgentRunPhase;
+  statusText: string;
+};
+
+const STATUS_TEXT_MAX = 100;
+const REASONING_THROTTLE_MS = 400;
+
+function friendlyToolLabel(toolName: string) {
+  const bare = toolName.includes("__")
+    ? toolName.split("__").slice(1).join("__")
+    : toolName.includes(":")
+      ? toolName.split(":").slice(1).join(":")
+      : toolName;
+  const spaced = bare.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!spaced) return "Using tool";
+  return `Using ${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
+}
+
+function truncateStatus(text: string) {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= STATUS_TEXT_MAX) return cleaned;
+  return `…${cleaned.slice(-(STATUS_TEXT_MAX - 1))}`;
+}
 
 export async function generateAgentTextReply(opts: {
   agent: Agent;
@@ -21,6 +46,7 @@ export async function generateAgentTextReply(opts: {
   history: { role: "user" | "assistant"; content: string }[];
   tools?: ToolSet;
   maxSteps?: number;
+  onProgress?: (update: AgentProgressUpdate) => void | Promise<void>;
 }): Promise<{ text: string; warnings: string[]; usage: AgentTokenUsage | null }> {
   const model = getLanguageModel(opts.agent, opts.apiKey, opts.baseUrl);
   const warnings: string[] = [];
@@ -33,8 +59,11 @@ export async function generateAgentTextReply(opts: {
   }
 
   const useTools = hasTools && opts.agent.provider !== "local";
+  const onProgress = opts.onProgress;
 
-  const { text, usage } = await generateText({
+  await onProgress?.({ phase: "thinking", statusText: "Thinking…" });
+
+  const result = streamText({
     model,
     system: opts.systemPrompt || `You are ${opts.agent.name}, a helpful community agent.`,
     messages: [
@@ -48,6 +77,61 @@ export async function generateAgentTextReply(opts: {
         }
       : {}),
   });
+
+  let reasoningBuf = "";
+  let lastReasoningWrite = 0;
+  let sawText = false;
+
+  for await (const part of result.fullStream) {
+    if (part.type === "reasoning-delta") {
+      const chunk =
+        "text" in part && typeof part.text === "string"
+          ? part.text
+          : "delta" in part && typeof (part as { delta?: string }).delta === "string"
+            ? (part as { delta: string }).delta
+            : "";
+      if (!chunk) continue;
+      reasoningBuf += chunk;
+      const now = Date.now();
+      if (now - lastReasoningWrite >= REASONING_THROTTLE_MS) {
+        lastReasoningWrite = now;
+        await onProgress?.({
+          phase: "reasoning",
+          statusText: truncateStatus(reasoningBuf),
+        });
+      }
+      continue;
+    }
+
+    if (part.type === "tool-call" || part.type === "tool-input-start") {
+      const name =
+        "toolName" in part && typeof part.toolName === "string"
+          ? part.toolName
+          : "tool";
+      await onProgress?.({
+        phase: "tool",
+        statusText: friendlyToolLabel(name),
+      });
+      continue;
+    }
+
+    if (part.type === "text-delta" && !sawText) {
+      sawText = true;
+      await onProgress?.({
+        phase: "generating",
+        statusText: "Generating reply",
+      });
+    }
+  }
+
+  if (reasoningBuf && Date.now() - lastReasoningWrite >= 50) {
+    await onProgress?.({
+      phase: "reasoning",
+      statusText: truncateStatus(reasoningBuf),
+    });
+  }
+
+  const [text, usage] = await Promise.all([result.text, result.usage]);
 
   const inputTokens = usage.inputTokens ?? null;
   const outputTokens = usage.outputTokens ?? null;

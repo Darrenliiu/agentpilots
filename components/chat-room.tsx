@@ -3,6 +3,7 @@
 import { format } from "date-fns";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AgentActivityBar } from "@/components/agent-activity-bar";
 import { Avatar } from "@/components/avatar";
 import { ChannelInviteButtons } from "@/components/channel-invite-buttons";
 import {
@@ -18,6 +19,7 @@ import {
   ProfileHoverCard,
   type ProfileHoverInfo,
 } from "@/components/profile-hover-card";
+import { useAgentActivity } from "@/hooks/use-agent-activity";
 import { useSpeechDictation } from "@/hooks/use-speech-dictation";
 import { agentProfilePath } from "@/lib/profile-paths";
 import { createClient } from "@/lib/supabase/client";
@@ -324,6 +326,11 @@ export function ChatRoom({
   skills?: Skill[];
   connectedConnectorIds?: string[];
 }) {
+  const { runs: activeRuns, now: activityNow } = useAgentActivity({
+    communityId,
+    channelId,
+  });
+
   const isDm = channelType === "dm";
   const dmAgent = isDm && agents.length > 0 ? agents[0] : null;
   const dmMember =
@@ -788,6 +795,7 @@ export function ChatRoom({
             </div>
           </div>
         </div>
+        <AgentActivityBar runs={activeRuns} now={activityNow} />
         {speechError && speechSupported ? (
           <p className="muted mt-2 text-xs" role="status">
             {speechError}

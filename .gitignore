@@ -37,7 +37,7 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files — keep secrets out of git; allow the example template
+# env files - keep secrets out of git; allow the example template
 .env
 .env.*
 !.env.example
@@ -52,6 +52,3 @@ supabase/.temp/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-# desktop release workflow requires GitHub workflow scope to push; keep local until token refreshed
-.github/workflows/

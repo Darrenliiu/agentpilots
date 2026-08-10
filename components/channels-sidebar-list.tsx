@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ChannelActivityBadge } from "@/components/channel-activity-popover";
 import {
   SidebarPlusButton,
   SidebarSectionHeader,
 } from "@/components/sidebar-section-header";
+import { useAgentActivity } from "@/hooks/use-agent-activity";
 import { createChannelAction } from "@/lib/actions";
 import { createClient } from "@/lib/supabase/client";
 
@@ -29,6 +31,7 @@ export function ChannelsSidebarList({
   const supabase = useMemo(() => createClient(), []);
   const [channels, setChannels] = useState(initialChannels);
   const [createOpen, setCreateOpen] = useState(false);
+  const { byChannel, now } = useAgentActivity({ communityId });
 
   useEffect(() => {
     setChannels(initialChannels);
@@ -78,16 +81,22 @@ export function ChannelsSidebarList({
         }
       />
       <ul className="space-y-0.5">
-        {channels.map((ch) => (
-          <li key={ch.id}>
-            <Link
-              href={`/c/${communitySlug}/${ch.slug}`}
-              className="nav-hover block rounded-md px-2 py-1 text-[13px] font-medium leading-snug"
-            >
-              # {ch.name}
-            </Link>
-          </li>
-        ))}
+        {channels.map((ch) => {
+          const activeRuns = byChannel.get(ch.id) || [];
+          return (
+            <li key={ch.id}>
+              <Link
+                href={`/c/${communitySlug}/${ch.slug}`}
+                className="nav-hover flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium leading-snug"
+              >
+                <span className="min-w-0 flex-1 truncate"># {ch.name}</span>
+                {activeRuns.length ? (
+                  <ChannelActivityBadge runs={activeRuns} now={now} />
+                ) : null}
+              </Link>
+            </li>
+          );
+        })}
       </ul>
 
       <CreateChannelDialog
