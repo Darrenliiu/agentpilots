@@ -43,6 +43,24 @@ export type DesktopUpdateStatus = {
   error?: string;
 };
 
+export type DesktopCliBridge = {
+  id: string;
+  label: string;
+  provider: string;
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+  installUrl: string;
+  installHint: string;
+  loginHint: string;
+};
+
+export type DesktopCliBridgeStatus = {
+  updatedAt?: string;
+  desktop?: boolean;
+  clis: DesktopCliBridge[];
+};
+
 export type AgentPilotsDesktopApi = {
   isDesktop: true;
   getVersion: () => Promise<string>;
@@ -56,6 +74,12 @@ export type AgentPilotsDesktopApi = {
     onDownloadProgress: (
       cb: (payload: { id: string; received: number; total: number }) => void,
     ) => () => void;
+  };
+  cli: {
+    status: () => Promise<DesktopCliBridgeStatus>;
+    detect: () => Promise<DesktopCliBridgeStatus>;
+    openInstall: (url: string) => Promise<boolean>;
+    onStatus: (cb: (payload: DesktopCliBridgeStatus) => void) => () => void;
   };
   updates: {
     status: () => Promise<DesktopUpdateStatus>;

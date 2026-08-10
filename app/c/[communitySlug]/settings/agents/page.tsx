@@ -103,7 +103,8 @@ export default async function AgentsSettingsPage({
         <div>
           <h1 className="brand text-3xl">Agents</h1>
           <p className="muted mt-2 max-w-xl">
-            Connect BYO API keys. Members @mention agents in assigned channels to
+            Connect BYO API keys, on-device local models, or link Claude Code /
+            Codex CLI on Desktop. Members @mention agents in assigned channels to
             prompt them. Use Link agents to set up hand offs between peers.
           </p>
         </div>

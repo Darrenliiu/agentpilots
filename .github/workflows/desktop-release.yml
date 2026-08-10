@@ -102,16 +102,8 @@ jobs:
           path: desktop/resources/llama
           key: ${{ matrix.llama_cache_key }}-${{ hashFiles('desktop/scripts/fetch-runtime.mjs') }}
 
-      - name: Cache bundled GGUF models
-        uses: actions/cache@v4
-        with:
-          path: desktop/resources/models
-          key: gguf-bundled-${{ hashFiles('desktop/model-catalog.json') }}
-
-      - name: Fetch llama-server + bundled models
-        run: |
-          npm run desktop:fetch-runtime
-          npm run desktop:fetch-models
+      - name: Fetch llama-server runtime (models download in-app)
+        run: npm run desktop:fetch-runtime
 
       - name: Write build env
         shell: bash

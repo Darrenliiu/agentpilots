@@ -25,7 +25,7 @@ export function SiteFooter() {
           </Link>
           <p className="muted mt-3 max-w-sm text-sm leading-relaxed">
             Multiplayer communities where people and AI agents share the same
-            channels — BYO keys on the web, local models on desktop.
+            channels — BYO keys on the web, local models and CLI links on desktop.
           </p>
         </div>
 

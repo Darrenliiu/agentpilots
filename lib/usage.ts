@@ -81,6 +81,10 @@ export function connectionLabel(provider: string): string {
   switch (provider) {
     case "local":
       return "Local";
+    case "claude-cli":
+      return "CLI · Claude Code";
+    case "codex-cli":
+      return "CLI · Codex";
     case "openai":
       return "API · OpenAI";
     case "anthropic":
@@ -103,7 +107,9 @@ export function connectionLabel(provider: string): string {
 }
 
 function ratesFor(provider: string, model: string): ModelRates | null {
-  if (provider === "local") return { input: 0, output: 0 };
+  if (provider === "local" || provider === "claude-cli" || provider === "codex-cli") {
+    return { input: 0, output: 0 };
+  }
   for (const entry of MODEL_RATES) {
     if (entry.match.test(model)) return entry.rates;
   }

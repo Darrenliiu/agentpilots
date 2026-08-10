@@ -1,6 +1,6 @@
 {
   "name": "agentpilots",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Multiplayer communities with people and AI agents in the same channels",
   "author": "AgentPilots",
@@ -69,6 +69,7 @@
       "desktop/main.cjs",
       "desktop/preload.cjs",
       "desktop/model-manager.cjs",
+      "desktop/cli-manager.cjs",
       "desktop/auto-updater.cjs",
       "desktop/model-catalog.json",
       "package.json"

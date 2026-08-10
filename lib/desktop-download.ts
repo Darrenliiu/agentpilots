@@ -5,7 +5,7 @@ const DEFAULT_GITHUB_REPO = "Darrenliiu/agentpilots";
 export function getDesktopVersionLabel() {
   const fromEnv = process.env.NEXT_PUBLIC_DESKTOP_VERSION?.trim();
   if (fromEnv) return fromEnv;
-  return typeof packageJson.version === "string" ? packageJson.version : "0.1.4";
+  return typeof packageJson.version === "string" ? packageJson.version : "0.1.5";
 }
 
 function getGithubRepo() {

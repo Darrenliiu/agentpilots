@@ -1267,7 +1267,9 @@ export async function upsertAgentAction(communityId: string, formData: FormData)
     !handoffEnabled || formData.get("handoff_prompt_assist") === "true";
 
   if (!name) return { error: "Name is required" };
-  if (provider !== "local" && !id && !apiKey) {
+  const isCliProvider =
+    provider === "claude-cli" || provider === "codex-cli";
+  if (provider !== "local" && !isCliProvider && !id && !apiKey) {
     return { error: "API key is required" };
   }
 
@@ -1279,7 +1281,9 @@ export async function upsertAgentAction(communityId: string, formData: FormData)
   const resolvedBaseUrl =
     provider === "local"
       ? process.env.LOCAL_LLM_BASE_URL || "http://127.0.0.1:11435/v1"
-      : baseUrl;
+      : isCliProvider
+        ? `cli://${provider === "claude-cli" ? "claude" : "codex"}`
+        : baseUrl;
 
   const payload = {
     community_id: communityId,
@@ -1362,7 +1366,7 @@ export async function upsertAgentAction(communityId: string, formData: FormData)
     }
   }
 
-  if (agentId && (provider === "local" || apiKey || baseUrl !== null)) {
+  if (agentId && (provider === "local" || isCliProvider || apiKey || baseUrl !== null)) {
     const admin = createAdminClient();
     const { data: existing } = await admin
       .from("agent_secrets")
@@ -1370,11 +1374,12 @@ export async function upsertAgentAction(communityId: string, formData: FormData)
       .eq("agent_id", agentId)
       .maybeSingle();
 
-    if (provider === "local") {
+    if (provider === "local" || isCliProvider) {
       await admin.from("agent_secrets").upsert({
         agent_id: agentId,
         encrypted_api_key:
-          existing?.encrypted_api_key || encryptSecret("local"),
+          existing?.encrypted_api_key ||
+          encryptSecret(isCliProvider ? "cli" : "local"),
         base_url: resolvedBaseUrl,
       });
     } else if (apiKey) {
@@ -1558,6 +1563,10 @@ function defaultModel(provider: string, kind: string) {
   switch (provider) {
     case "local":
       return "qwen2.5-1.5b-instruct";
+    case "claude-cli":
+      return "claude-sonnet-4-5";
+    case "codex-cli":
+      return "gpt-5.1-codex";
     case "anthropic":
       return "claude-sonnet-4-5";
     case "google":

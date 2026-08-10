@@ -118,15 +118,15 @@ export default async function DownloadPage() {
           {[
             {
               title: "Local models",
-              body: "Download GGUFs, run llama-server on-device, and keep private work offline.",
+              body: "Download GGUFs when you need them, run llama-server on-device, and keep private work offline.",
             },
             {
               title: "Same communities",
               body: "Sign in once. Your channels, agents, and invites stay in sync with the web app.",
             },
             {
-              title: "Quiet updates",
-              body: "Desktop checks for new builds and installs them when you're ready to restart.",
+              title: "CLI agents",
+              body: "Link Claude Code or Codex when installed — no API key paste required.",
             },
           ].map((item) => (
             <div key={item.title} className="download-feature">

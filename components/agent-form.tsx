@@ -9,6 +9,7 @@ import {
   type Channel,
 } from "@/lib/types";
 import type { LocalModelBridge } from "@/types/desktop";
+import { CliConnectPanel } from "@/components/cli-connect-panel";
 
 function CheckTile({
   name,
@@ -105,10 +106,15 @@ export function AgentForm({
       if (provider === "higgsfield") return "gpt-image-2";
       return "dall-e-3";
     }
+    if (provider === "claude-cli") return "claude-sonnet-4-5";
+    if (provider === "codex-cli") return "gpt-5.1-codex";
     return "gpt-4o-mini";
   }, [kind, provider]);
 
   const isLocal = kind === "text" && provider === "local";
+  const isCli =
+    kind === "text" &&
+    (provider === "claude-cli" || provider === "codex-cli");
   const formId = agent?.id || "new";
 
   useEffect(() => {
@@ -215,7 +221,7 @@ export function AgentForm({
                     onChange={() => {
                       const next = opt.value;
                       setKind(next);
-                      if (next !== "text" && provider === "local") {
+                      if (next !== "text" && (provider === "local" || provider === "claude-cli" || provider === "codex-cli")) {
                         setProvider("openai");
                       }
                       if (next === "video" && provider === "google") {
@@ -307,7 +313,7 @@ export function AgentForm({
         />
       </div>
 
-      {!isLocal ? (
+      {!isLocal && !isCli ? (
         <div className="form-section">
           <span className="form-section__legend">Credentials</span>
           <p className="form-section__hint">
@@ -341,12 +347,21 @@ export function AgentForm({
             </div>
           </div>
         </div>
-      ) : (
+      ) : null}
+
+      {isLocal ? (
         <p className="muted rounded-xl border px-3.5 py-3 text-sm" style={{ borderColor: "var(--line)", background: "var(--field-bg)" }}>
-          Local agents use the on-device llama.cpp runtime. Manage downloads and
-          the active GGUF under Local models.
+          Local agents use the on-device llama.cpp runtime. Download a GGUF and
+          set the active model under Local models — weights are not bundled in
+          the installer.
         </p>
-      )}
+      ) : null}
+
+      {isCli ? (
+        <CliConnectPanel
+          provider={provider as "claude-cli" | "codex-cli"}
+        />
+      ) : null}
 
       <div className="form-section">
         <span className="form-section__legend">Status</span>

@@ -105,8 +105,8 @@ export function LocalModelsPanel({
         <div>
           <h1 className="brand text-3xl">Local models</h1>
           <p className="muted mt-2 max-w-2xl text-sm">
-            On-device LLMs powered by llama.cpp. Bundled small models are ready
-            offline; larger models can be downloaded when you need more quality.
+            On-device LLMs powered by llama.cpp. Download a GGUF below to keep
+            private work offline — nothing ships inside the installer.
           </p>
         </div>
       ) : null}

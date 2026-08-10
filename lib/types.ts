@@ -212,6 +212,8 @@ export type Skill = {
 
 export const TEXT_PROVIDERS = [
   { id: "local", label: "Local (on-device)" },
+  { id: "claude-cli", label: "Claude Code CLI" },
+  { id: "codex-cli", label: "OpenAI Codex CLI" },
   { id: "openai", label: "OpenAI" },
   { id: "anthropic", label: "Anthropic (Claude)" },
   { id: "google", label: "Google (Gemini)" },

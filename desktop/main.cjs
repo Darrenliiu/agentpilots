@@ -6,6 +6,7 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 const { ModelManager, LOCAL_LLM_PORT, LOCAL_LLM_HOST } = require("./model-manager.cjs");
+const { CliManager } = require("./cli-manager.cjs");
 const { setupAutoUpdater } = require("./auto-updater.cjs");
 
 const isDev = !app.isPackaged;
@@ -20,8 +21,12 @@ let mainWindow = null;
 let nextProcess = null;
 /** @type {ModelManager | null} */
 let modelManager = null;
+/** @type {CliManager | null} */
+let cliManager = null;
 /** @type {ReturnType<typeof setupAutoUpdater> | null} */
 let updater = null;
+/** @type {ReturnType<typeof setInterval> | null} */
+let cliCommandTimer = null;
 
 function getResourcesPath() {
   if (isDev) return path.join(__dirname, "resources");
@@ -108,13 +113,49 @@ function appendNextLog(chunk) {
   }
 }
 
+function startCliCommandWatcher() {
+  if (!cliManager) return;
+  const commandPath = path.join(app.getPath("userData"), "cli-command.json");
+  if (!fs.existsSync(commandPath)) {
+    fs.writeFileSync(commandPath, "{}\n", "utf8");
+  }
+  let last = "";
+  cliCommandTimer = setInterval(() => {
+    try {
+      const raw = fs.readFileSync(commandPath, "utf8");
+      if (raw === last) return;
+      last = raw;
+      const cmd = JSON.parse(raw);
+      if (cmd?.action === "detect") {
+        const payload = cliManager.detectAll();
+        fs.writeFileSync(
+          commandPath,
+          JSON.stringify({ action: "noop", done: true }),
+          "utf8",
+        );
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("cli:status", payload);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, 800);
+}
+
 async function startNextServer() {
+  const cliStatus = cliManager?.detectAll();
   const env = {
     ...process.env,
     PORT: String(NEXT_PORT),
     HOSTNAME: "127.0.0.1",
     LOCAL_LLM_BASE_URL: `http://${LOCAL_LLM_HOST}:${LOCAL_LLM_PORT}/v1`,
     LOCAL_LLM_STATUS_PATH: modelManager?.statusPath || "",
+    AGENTPILOTS_CLI_STATUS_PATH: cliManager?.statusPath || "",
+    AGENTPILOTS_CLAUDE_CLI_PATH:
+      cliStatus?.env?.AGENTPILOTS_CLAUDE_CLI_PATH || "",
+    AGENTPILOTS_CODEX_CLI_PATH:
+      cliStatus?.env?.AGENTPILOTS_CODEX_CLI_PATH || "",
     AGENTPILOTS_DESKTOP: "1",
     NEXT_PUBLIC_SITE_URL:
       process.env.NEXT_PUBLIC_SITE_URL || "https://agentpilots.ai",
@@ -249,6 +290,17 @@ function registerIpc() {
     modelManager?.cancelDownload(String(id));
     return true;
   });
+  ipcMain.handle("cli:status", async () => cliManager?.writeStatus() || { clis: [] });
+  ipcMain.handle("cli:detect", async () => {
+    if (!cliManager) throw new Error("CLI manager not ready");
+    return cliManager.detectAll();
+  });
+  ipcMain.handle("cli:openInstall", async (_e, url) => {
+    const target = String(url || "");
+    if (!/^https?:\/\//i.test(target)) return false;
+    await shell.openExternal(target);
+    return true;
+  });
   ipcMain.handle("updates:status", async () => updater?.getState() || { status: "idle" });
   ipcMain.handle("updates:check", async () => updater?.check() || { status: "idle" });
   ipcMain.handle("updates:install", async () => updater?.install() || false);
@@ -278,6 +330,12 @@ async function bootstrap() {
   modelManager.writeStatus();
   modelManager.startCommandWatcher();
 
+  cliManager = new CliManager({
+    userDataPath: app.getPath("userData"),
+  });
+  cliManager.detectAll();
+  startCliCommandWatcher();
+
   modelManager.on("status", (payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("models:status", payload);
@@ -286,6 +344,11 @@ async function bootstrap() {
   modelManager.on("download-progress", (payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("models:download-progress", payload);
+    }
+  });
+  cliManager.on("status", (payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("cli:status", payload);
     }
   });
 
@@ -321,6 +384,10 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  if (cliCommandTimer) {
+    clearInterval(cliCommandTimer);
+    cliCommandTimer = null;
+  }
   if (nextProcess && !nextProcess.killed) {
     try {
       if (process.platform === "win32" && nextProcess.pid) {

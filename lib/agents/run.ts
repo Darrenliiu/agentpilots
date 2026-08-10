@@ -8,6 +8,10 @@ import {
   stripAgentMentions,
 } from "@/lib/agents/providers";
 import {
+  generateAgentCliReply,
+  isCliProvider,
+} from "@/lib/agents/cli-bridge";
+import {
   decryptConnectorToken,
   namespaceTools,
   openConnectorMcpClient,
@@ -129,16 +133,19 @@ async function runTargetAgents(opts: {
 
     try {
       const isLocal = agent.provider === "local";
+      const isCli = isCliProvider(agent.provider);
       const { data: secret } = await admin
         .from("agent_secrets")
         .select("*")
         .eq("agent_id", agent.id)
         .maybeSingle();
-      if (!isLocal && !secret?.encrypted_api_key) {
+      if (!isLocal && !isCli && !secret?.encrypted_api_key) {
         throw new Error("No API key configured for this agent");
       }
-      const apiKey = isLocal
-        ? "local"
+      const apiKey = isLocal || isCli
+        ? isCli
+          ? "cli"
+          : "local"
         : decryptSecret(secret!.encrypted_api_key);
       const baseUrl = isLocal
         ? secret?.base_url ||
@@ -184,9 +191,10 @@ async function runTargetAgents(opts: {
           });
 
         const webSearchEnabled = meta.web_search !== false;
-        const nativeSearch = webSearchEnabled
-          ? getProviderWebSearchTools(agent.provider)
-          : {};
+        const nativeSearch =
+          webSearchEnabled && !isCli
+            ? getProviderWebSearchTools(agent.provider)
+            : {};
         const tools: ToolSet = { ...mcpTools, ...nativeSearch };
 
         const systemParts = [
@@ -220,29 +228,57 @@ async function runTargetAgents(opts: {
           ? meta.attachments
           : undefined;
 
-        const result = await generateAgentTextReply({
-          agent,
-          apiKey,
-          baseUrl,
-          systemPrompt: systemParts.join("\n\n"),
-          userPrompt: prompt,
-          attachments,
-          history,
-          tools: Object.keys(tools).length ? tools : undefined,
-          onProgress: publishProgress,
-        });
+        if (isCli) {
+          if (Object.keys(tools).length) {
+            toolWarnings.push(
+              "CLI-linked agents run through the installed CLI; MCP connectors and native web search are skipped.",
+            );
+          }
+          await publishProgress({
+            phase: "thinking",
+            statusText:
+              agent.provider === "claude-cli"
+                ? "Running Claude Code CLI…"
+                : "Running Codex CLI…",
+          });
+          const result = await generateAgentCliReply({
+            agent,
+            systemPrompt: systemParts.join("\n\n"),
+            userPrompt: prompt,
+            history,
+          });
+          const allWarnings = [...toolWarnings, ...result.warnings];
+          body = result.text;
+          if (allWarnings.length) {
+            body += `\n\n_${allWarnings.join(" ")}_`;
+            metadata.warnings = allWarnings;
+          }
+          metadata.connection = "cli";
+        } else {
+          const result = await generateAgentTextReply({
+            agent,
+            apiKey,
+            baseUrl,
+            systemPrompt: systemParts.join("\n\n"),
+            userPrompt: prompt,
+            attachments,
+            history,
+            tools: Object.keys(tools).length ? tools : undefined,
+            onProgress: publishProgress,
+          });
 
-        const allWarnings = [...toolWarnings, ...result.warnings];
-        body = result.text;
-        if (allWarnings.length) {
-          body += `\n\n_${allWarnings.join(" ")}_`;
-          metadata.warnings = allWarnings;
-        }
-        if (Object.keys(tools).length) {
-          metadata.tools_used = Object.keys(tools);
-        }
-        if (result.usage) {
-          metadata.usage = result.usage;
+          const allWarnings = [...toolWarnings, ...result.warnings];
+          body = result.text;
+          if (allWarnings.length) {
+            body += `\n\n_${allWarnings.join(" ")}_`;
+            metadata.warnings = allWarnings;
+          }
+          if (Object.keys(tools).length) {
+            metadata.tools_used = Object.keys(tools);
+          }
+          if (result.usage) {
+            metadata.usage = result.usage;
+          }
         }
       } else {
         const generatingLabel =

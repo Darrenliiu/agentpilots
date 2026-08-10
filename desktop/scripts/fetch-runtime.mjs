@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Downloads llama-server (Windows x64 or macOS arm64) and optionally bundled
- * GGUF models into desktop/resources for local/desktop development and packaging.
+ * Downloads llama-server (Windows x64 or macOS arm64) and optionally GGUF
+ * models into desktop/resources for local desktop development.
+ * Packaged installers do not ship GGUFs — users download them in-app.
  *
  * Usage:
  *   node desktop/scripts/fetch-runtime.mjs
- *   node desktop/scripts/fetch-runtime.mjs --models
- *   node desktop/scripts/fetch-runtime.mjs --models --all
+ *   node desktop/scripts/fetch-runtime.mjs --models          # default model only
+ *   node desktop/scripts/fetch-runtime.mjs --models --all    # full catalog
  */
 import {
   createWriteStream,
@@ -224,7 +225,13 @@ async function fetchLlamaServer() {
 
 async function fetchModels() {
   mkdirSync(modelsDir, { recursive: true });
-  const models = catalog.models.filter((m) => (wantAllModels ? true : m.bundled));
+  const models = catalog.models.filter((m) =>
+    wantAllModels ? true : m.id === catalog.defaultModelId,
+  );
+  if (!models.length) {
+    console.log("No models selected to download.");
+    return;
+  }
   for (const model of models) {
     const dest = path.join(modelsDir, model.filename);
     if (existsSync(dest)) {
@@ -241,7 +248,7 @@ async function main() {
   if (wantModels) await fetchModels();
   else {
     console.log(
-      "Skipped GGUF downloads (pass --models to fetch bundled models, --all for full catalog).",
+      "Skipped GGUF downloads (pass --models for the default model, --models --all for the full catalog). Installers ship without GGUFs.",
     );
   }
   console.log("Done.");

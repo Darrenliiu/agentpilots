@@ -10,8 +10,8 @@
       "sizeBytes": 1117320736,
       "minRamGb": 4,
       "license": "Apache-2.0",
-      "bundled": true,
-      "description": "Fast on-device default. Good for light agents."
+      "bundled": false,
+      "description": "Fast on-device default. Download required (~1.1 GB)."
     },
     {
       "id": "llama-3.2-1b-instruct",

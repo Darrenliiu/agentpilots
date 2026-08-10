@@ -22,6 +22,16 @@ contextBridge.exposeInMainWorld("agentpilots", {
       return () => ipcRenderer.removeListener("models:download-progress", handler);
     },
   },
+  cli: {
+    status: () => ipcRenderer.invoke("cli:status"),
+    detect: () => ipcRenderer.invoke("cli:detect"),
+    openInstall: (url) => ipcRenderer.invoke("cli:openInstall", url),
+    onStatus: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on("cli:status", handler);
+      return () => ipcRenderer.removeListener("cli:status", handler);
+    },
+  },
   updates: {
     status: () => ipcRenderer.invoke("updates:status"),
     check: () => ipcRenderer.invoke("updates:check"),
