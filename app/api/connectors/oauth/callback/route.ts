@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { encryptSecret } from "@/lib/agents/encrypt";
 import {
+  MCP_OAUTH_STATE_COOKIE,
+  cookieValue,
+  decodeOAuthStateCookie,
   exchangeAuthorizationCode,
-  takeOAuthState,
 } from "@/lib/connectors/oauth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -13,14 +15,33 @@ export async function GET(request: Request) {
   const error = searchParams.get("error");
 
   const cookieHeader = request.headers.get("cookie") || "";
-  const clientId = cookieValue(cookieHeader, "mcp_oauth_client_id");
-  const tokenEndpoint = cookieValue(cookieHeader, "mcp_oauth_token_endpoint");
+  const pending = decodeOAuthStateCookie(
+    cookieValue(cookieHeader, MCP_OAUTH_STATE_COOKIE),
+  );
+
+  const clearPending = (response: NextResponse) => {
+    response.cookies.set(MCP_OAUTH_STATE_COOKIE, "", { maxAge: 0, path: "/" });
+    return response;
+  };
 
   if (error) {
-    return NextResponse.redirect(
-      new URL(
-        `/home?connector_error=${encodeURIComponent(error)}`,
-        request.url,
+    const slug = pending?.communitySlug;
+    if (slug) {
+      return clearPending(
+        NextResponse.redirect(
+          new URL(
+            `/c/${slug}/settings/connectors?error=${encodeURIComponent(error)}`,
+            request.url,
+          ),
+        ),
+      );
+    }
+    return clearPending(
+      NextResponse.redirect(
+        new URL(
+          `/home?connector_error=${encodeURIComponent(error)}`,
+          request.url,
+        ),
       ),
     );
   }
@@ -29,19 +50,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing code/state" }, { status: 400 });
   }
 
-  const pending = takeOAuthState(state);
-  if (!pending) {
-    return NextResponse.json(
-      { error: "Invalid or expired OAuth state" },
-      { status: 400 },
-    );
-  }
-
-  if (!clientId || !tokenEndpoint) {
-    return NextResponse.redirect(
-      new URL(
-        `/c/${pending.communitySlug}/settings/connectors?error=oauth_session`,
-        request.url,
+  if (!pending || pending.state !== state) {
+    const slug = pending?.communitySlug;
+    if (slug) {
+      return clearPending(
+        NextResponse.redirect(
+          new URL(
+            `/c/${slug}/settings/connectors?error=oauth_session`,
+            request.url,
+          ),
+        ),
+      );
+    }
+    return clearPending(
+      NextResponse.json(
+        { error: "Invalid or expired OAuth state" },
+        { status: 400 },
       ),
     );
   }
@@ -50,18 +74,22 @@ export async function GET(request: Request) {
   const redirectUri = `${origin}/api/connectors/oauth/callback`;
 
   const tokens = await exchangeAuthorizationCode({
-    tokenEndpoint,
+    tokenEndpoint: pending.tokenEndpoint,
     code,
     redirectUri,
     codeVerifier: pending.codeVerifier,
-    clientId,
+    clientId: pending.clientId,
+    clientSecret: pending.clientSecret,
+    resource: pending.resource,
   });
 
   if (!tokens) {
-    return NextResponse.redirect(
-      new URL(
-        `/c/${pending.communitySlug}/settings/connectors?error=token_exchange`,
-        request.url,
+    return clearPending(
+      NextResponse.redirect(
+        new URL(
+          `/c/${pending.communitySlug}/settings/connectors?error=token_exchange`,
+          request.url,
+        ),
       ),
     );
   }
@@ -85,6 +113,12 @@ export async function GET(request: Request) {
       ? encryptSecret(tokens.refresh_token)
       : null,
     token_expires_at: expiresAt,
+    oauth_client_id: pending.clientId,
+    encrypted_oauth_client_secret: pending.clientSecret
+      ? encryptSecret(pending.clientSecret)
+      : null,
+    oauth_token_endpoint: pending.tokenEndpoint,
+    oauth_resource: pending.resource,
     status: "connected" as const,
     error: null,
   };
@@ -103,21 +137,12 @@ export async function GET(request: Request) {
     });
   }
 
-  const response = NextResponse.redirect(
-    new URL(
-      `/c/${pending.communitySlug}/settings/connectors?connected=1`,
-      request.url,
+  return clearPending(
+    NextResponse.redirect(
+      new URL(
+        `/c/${pending.communitySlug}/settings/connectors?connected=1`,
+        request.url,
+      ),
     ),
   );
-  response.cookies.set("mcp_oauth_client_id", "", { maxAge: 0, path: "/" });
-  response.cookies.set("mcp_oauth_token_endpoint", "", {
-    maxAge: 0,
-    path: "/",
-  });
-  return response;
-}
-
-function cookieValue(header: string, name: string): string | null {
-  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
 }

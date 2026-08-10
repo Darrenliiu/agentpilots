@@ -21,6 +21,7 @@ export function ConnectorsSettingsPanel({
   connectors,
   connectedIds,
   sharedIds,
+  oauthNotice,
   enableCatalogAction,
   addCustomAction,
   toggleAction,
@@ -37,6 +38,7 @@ export function ConnectorsSettingsPanel({
   connectors: CommunityConnector[];
   connectedIds: string[];
   sharedIds: string[];
+  oauthNotice?: { kind: "success" | "error"; message: string } | null;
   enableCatalogAction: (formData: FormData) => Promise<{ error?: string } | void>;
   addCustomAction: (formData: FormData) => Promise<{ error?: string } | void>;
   toggleAction: (formData: FormData) => Promise<{ error?: string } | void>;
@@ -77,6 +79,16 @@ export function ConnectorsSettingsPanel({
 
   return (
     <div className="stack">
+      {oauthNotice?.kind === "success" ? (
+        <p className="text-sm" style={{ color: "var(--success, #15803d)" }}>
+          {oauthNotice.message}
+        </p>
+      ) : null}
+      {oauthNotice?.kind === "error" ? (
+        <p className="text-sm" style={{ color: "var(--danger)" }}>
+          {oauthNotice.message}
+        </p>
+      ) : null}
       {error ? (
         <p className="text-sm" style={{ color: "var(--danger)" }}>
           {error}

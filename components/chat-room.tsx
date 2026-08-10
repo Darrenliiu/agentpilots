@@ -9,8 +9,15 @@ import { ChannelInviteButtons } from "@/components/channel-invite-buttons";
 import {
   ComposerChips,
   ComposerPlusMenu,
+  DEFAULT_COMPOSER_ATTACHMENT,
+  clearComposerAttachmentFiles,
   type ComposerAttachment,
 } from "@/components/composer-plus-menu";
+import {
+  MessageActionToolbar,
+  MessageReactionChips,
+  type ReactionGroup,
+} from "@/components/message-action-toolbar";
 import {
   MessageBody,
   type MentionTarget,
@@ -21,6 +28,10 @@ import {
 } from "@/components/profile-hover-card";
 import { useAgentActivity } from "@/hooks/use-agent-activity";
 import { useSpeechDictation } from "@/hooks/use-speech-dictation";
+import {
+  isImageMime,
+  uploadMessageAttachments,
+} from "@/lib/message-attachments";
 import { agentProfilePath } from "@/lib/profile-paths";
 import { createClient } from "@/lib/supabase/client";
 import type {
@@ -29,6 +40,8 @@ import type {
   CommunityRole,
   HandoffMetadata,
   Message,
+  MessageAttachment,
+  MessageReaction,
   Profile,
   Skill,
 } from "@/lib/types";
@@ -92,6 +105,28 @@ function SendIcon() {
 
 function escapeRegExp(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseMessageAttachments(
+  metadata: Record<string, unknown> | null | undefined,
+): MessageAttachment[] {
+  const raw = metadata?.attachments;
+  if (!Array.isArray(raw)) return [];
+  const out: MessageAttachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const a = item as Partial<MessageAttachment>;
+    if (
+      typeof a.url !== "string" ||
+      typeof a.name !== "string" ||
+      typeof a.mime !== "string" ||
+      typeof a.size !== "number"
+    ) {
+      continue;
+    }
+    out.push({ url: a.url, name: a.name, mime: a.mime, size: a.size });
+  }
+  return out;
 }
 
 function parseHandoffMetadata(
@@ -287,6 +322,53 @@ function messageHoverInfo(
   return null;
 }
 
+function messageDisplayName(message: RichMessage) {
+  return message.agent?.name || message.author?.display_name || "Unknown";
+}
+
+function snippetBody(body: string, max = 120) {
+  const flat = body.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  return `${flat.slice(0, max - 1)}…`;
+}
+
+function groupReactions(
+  reactions: MessageReaction[],
+  messageId: string,
+  currentUserId: string,
+): ReactionGroup[] {
+  const map = new Map<string, ReactionGroup>();
+  for (const r of reactions) {
+    if (r.message_id !== messageId) continue;
+    const existing = map.get(r.emoji);
+    if (existing) {
+      existing.count += 1;
+      if (r.user_id === currentUserId) existing.reactedByMe = true;
+    } else {
+      map.set(r.emoji, {
+        emoji: r.emoji,
+        count: 1,
+        reactedByMe: r.user_id === currentUserId,
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji));
+}
+
+function myReactedEmojis(
+  reactions: MessageReaction[],
+  messageId: string,
+  currentUserId: string,
+) {
+  const set = new Set<string>();
+  for (const r of reactions) {
+    if (r.message_id === messageId && r.user_id === currentUserId) {
+      set.add(r.emoji);
+    }
+  }
+  return set;
+}
+
 export function ChatRoom({
   channelId,
   channelName,
@@ -294,6 +376,7 @@ export function ChatRoom({
   communityId,
   communitySlug,
   initialMessages,
+  initialReactions = [],
   agents,
   communityAgents = [],
   members = [],
@@ -310,6 +393,7 @@ export function ChatRoom({
   communityId: string;
   communitySlug: string;
   initialMessages: RichMessage[];
+  initialReactions?: MessageReaction[];
   agents: Agent[];
   communityAgents?: {
     id: string;
@@ -375,16 +459,29 @@ export function ChatRoom({
         };
 
   const [messages, setMessages] = useState<RichMessage[]>(initialMessages);
+  const [reactions, setReactions] = useState<MessageReaction[]>(initialReactions);
+  const [replyTo, setReplyTo] = useState<RichMessage | null>(null);
   const [body, setBody] = useState("");
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [attachments, setAttachments] = useState<ComposerAttachment>({
-    connectorIds: [],
-    skillIds: [],
-    imageAgentId: null,
-  });
+  const [attachments, setAttachments] = useState<ComposerAttachment>(
+    DEFAULT_COMPOSER_ATTACHMENT,
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const messageRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const messageIdsRef = useRef<Set<string>>(new Set());
   const supabase = useMemo(() => createClient(), []);
+
+  const messagesById = useMemo(() => {
+    const map = new Map<string, RichMessage>();
+    for (const m of messages) map.set(m.id, m);
+    return map;
+  }, [messages]);
+
+  useEffect(() => {
+    messageIdsRef.current = new Set(messages.map((m) => m.id));
+  }, [messages]);
 
   const mentionTargets = useMemo(
     () => buildMentionTargets(agents, members),
@@ -408,7 +505,10 @@ export function ChatRoom({
         },
         async (payload) => {
           const row = payload.new as Message;
-          const enriched: RichMessage = { ...row };
+          const enriched: RichMessage = {
+            ...row,
+            parent_id: row.parent_id ?? null,
+          };
           if (row.author_id) {
             const { data } = await supabase
               .from("profiles")
@@ -428,6 +528,55 @@ export function ChatRoom({
           setMessages((prev) =>
             prev.some((m) => m.id === row.id) ? prev : [...prev, enriched],
           );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "message_reactions",
+        },
+        (payload) => {
+          const row = payload.new as MessageReaction;
+          setReactions((prev) => {
+            if (prev.some((r) => r.id === row.id)) return prev;
+            if (!messageIdsRef.current.has(row.message_id)) return prev;
+            // Drop matching optimistic rows so we don't double-count
+            const withoutOptimistic = prev.filter(
+              (r) =>
+                !(
+                  r.id.startsWith("optimistic:") &&
+                  r.message_id === row.message_id &&
+                  r.user_id === row.user_id &&
+                  r.emoji === row.emoji
+                ),
+            );
+            if (
+              withoutOptimistic.some(
+                (r) =>
+                  r.message_id === row.message_id &&
+                  r.user_id === row.user_id &&
+                  r.emoji === row.emoji,
+              )
+            ) {
+              return withoutOptimistic;
+            }
+            return [...withoutOptimistic, row];
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "message_reactions",
+        },
+        (payload) => {
+          const row = payload.old as Partial<MessageReaction>;
+          if (!row.id) return;
+          setReactions((prev) => prev.filter((r) => r.id !== row.id));
         },
       )
       .subscribe();
@@ -469,10 +618,84 @@ export function ChatRoom({
     onChangeBody(next);
   }
 
+  function startReply(message: RichMessage) {
+    setReplyTo(message);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
+  function scrollToMessage(id: string) {
+    const el = messageRefs.current.get(id);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function toggleReaction(messageId: string, emoji: string) {
+    const existing = reactions.find(
+      (r) =>
+        r.message_id === messageId &&
+        r.user_id === currentUserId &&
+        r.emoji === emoji,
+    );
+
+    if (existing) {
+      setReactions((prev) => prev.filter((r) => r.id !== existing.id));
+      const { error } = await supabase
+        .from("message_reactions")
+        .delete()
+        .eq("id", existing.id);
+      if (error) {
+        setReactions((prev) =>
+          prev.some((r) => r.id === existing.id) ? prev : [...prev, existing],
+        );
+        alert(error.message);
+      }
+      return;
+    }
+
+    const optimistic: MessageReaction = {
+      id: `optimistic:${crypto.randomUUID()}`,
+      message_id: messageId,
+      user_id: currentUserId,
+      emoji,
+      created_at: new Date().toISOString(),
+    };
+    setReactions((prev) => [...prev, optimistic]);
+
+    const { data, error } = await supabase
+      .from("message_reactions")
+      .insert({
+        message_id: messageId,
+        user_id: currentUserId,
+        emoji,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      setReactions((prev) => prev.filter((r) => r.id !== optimistic.id));
+      alert(error.message);
+      return;
+    }
+
+    setReactions((prev) => {
+      const withoutOptimistic = prev.filter((r) => r.id !== optimistic.id);
+      if (withoutOptimistic.some((r) => r.id === data.id)) return withoutOptimistic;
+      return [...withoutOptimistic, data as MessageReaction];
+    });
+  }
+
+  async function copyMessage(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      alert("Could not copy message");
+    }
+  }
+
   async function sendMessage(e: React.FormEvent) {
     e.preventDefault();
     let text = body.trim();
-    if (!text || sending) return;
+    const pendingFiles = attachments.files.map((f) => f.file);
+    if ((!text && !pendingFiles.length) || sending) return;
     stopSpeech();
     setSending(true);
 
@@ -480,7 +703,7 @@ export function ChatRoom({
     if (attachments.imageAgentId) {
       const imgAgent = agents.find((a) => a.id === attachments.imageAgentId);
       if (imgAgent && !new RegExp(`@${escapeRegExp(imgAgent.name)}\\b`, "i").test(text)) {
-        text = `@${imgAgent.name} ${text}`;
+        text = `@${imgAgent.name} ${text}`.trim();
       }
     }
 
@@ -499,10 +722,28 @@ export function ChatRoom({
       ]),
     ];
 
+    let uploaded: MessageAttachment[] = [];
+    if (pendingFiles.length) {
+      const result = await uploadMessageAttachments({
+        supabase,
+        communityId,
+        channelId,
+        files: pendingFiles,
+      });
+      if (result.error) {
+        setSending(false);
+        alert(result.error);
+        return;
+      }
+      uploaded = result.attachments;
+    }
+
     const metadata = {
       mentioned_agent_ids,
       connector_ids: attachments.connectorIds,
       skill_ids: attachments.skillIds,
+      web_search: attachments.webSearch,
+      ...(uploaded.length ? { attachments: uploaded } : {}),
       ...(attachments.imageAgentId
         ? { image_agent_id: attachments.imageAgentId }
         : {}),
@@ -515,6 +756,7 @@ export function ChatRoom({
         author_id: currentUserId,
         body: text,
         metadata,
+        parent_id: replyTo?.id ?? null,
         client_message_id: crypto.randomUUID(),
       })
       .select("*")
@@ -528,7 +770,11 @@ export function ChatRoom({
 
     setBody("");
     setMentionQuery(null);
-    setAttachments({ connectorIds: [], skillIds: [], imageAgentId: null });
+    setReplyTo(null);
+    setAttachments((prev) => {
+      const cleared = clearComposerAttachmentFiles(prev);
+      return { ...DEFAULT_COMPOSER_ATTACHMENT, webSearch: cleared.webSearch };
+    });
 
     if (mentioned_agent_ids.length && data) {
       void fetch("/api/agents/run", {
@@ -602,16 +848,20 @@ export function ChatRoom({
         </div>
       </header>
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
+      <div className="flex-1 space-y-1 overflow-y-auto px-5 py-5">
         {messages.map((m) => {
-          const name = m.agent?.name || m.author?.display_name || "Unknown";
+          const name = messageDisplayName(m);
           const isAgent = Boolean(m.agent_id);
           const avatarUrl = m.agent?.avatar_url || m.author?.avatar_url || null;
           const mediaUrl =
             typeof m.metadata?.media_url === "string" ? m.metadata.media_url : null;
+          const messageAttachments = parseMessageAttachments(m.metadata);
           const handoff = parseHandoffMetadata(m.metadata);
           const tokenUsage = isAgent ? parseTokenUsage(m.metadata) : null;
           const hover = messageHoverInfo(m, members);
+          const parent = m.parent_id ? messagesById.get(m.parent_id) : null;
+          const reactionGroups = groupReactions(reactions, m.id, currentUserId);
+          const reactedEmojis = myReactedEmojis(reactions, m.id, currentUserId);
           const avatar = (
             <Avatar
               src={avatarUrl}
@@ -630,7 +880,20 @@ export function ChatRoom({
             </span>
           );
           return (
-            <article key={m.id} className="flex max-w-3xl gap-3">
+            <article
+              key={m.id}
+              className="message-row flex max-w-3xl gap-3"
+              ref={(el) => {
+                if (el) messageRefs.current.set(m.id, el);
+                else messageRefs.current.delete(m.id);
+              }}
+            >
+              <MessageActionToolbar
+                reactedEmojis={reactedEmojis}
+                onReact={(emoji) => void toggleReaction(m.id, emoji)}
+                onReply={() => startReply(m)}
+                onCopy={() => void copyMessage(m.body)}
+              />
               {hover ? (
                 <ProfileHoverCard
                   info={hover}
@@ -666,12 +929,69 @@ export function ChatRoom({
                     {format(new Date(m.created_at), "MMM d, h:mm a")}
                   </span>
                 </div>
-                <MessageBody
-                  body={m.body}
-                  targets={mentionTargets}
-                  communitySlug={communitySlug}
-                  currentUserId={currentUserId}
-                />
+                {parent ? (
+                  <button
+                    type="button"
+                    className="message-reply-quote"
+                    onClick={() => scrollToMessage(parent.id)}
+                  >
+                    <div className="min-w-0">
+                      <div className="message-reply-quote__meta">
+                        Replying to {messageDisplayName(parent)}
+                      </div>
+                      <div className="message-reply-quote__body">
+                        {snippetBody(parent.body)}
+                      </div>
+                    </div>
+                  </button>
+                ) : m.parent_id ? (
+                  <div className="message-reply-quote" aria-hidden>
+                    <div className="min-w-0">
+                      <div className="message-reply-quote__meta">Replying to a message</div>
+                      <div className="message-reply-quote__body">Original message unavailable</div>
+                    </div>
+                  </div>
+                ) : null}
+                {m.body.trim() ? (
+                  <MessageBody
+                    body={m.body}
+                    targets={mentionTargets}
+                    communitySlug={communitySlug}
+                    currentUserId={currentUserId}
+                  />
+                ) : null}
+                {messageAttachments.length ? (
+                  <div className="message-attachments">
+                    {messageAttachments.map((att) =>
+                      isImageMime(att.mime) ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <a
+                          key={att.url}
+                          href={att.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="message-attachments__image-link"
+                        >
+                          <img
+                            src={att.url}
+                            alt={att.name}
+                            className="message-attachments__image"
+                          />
+                        </a>
+                      ) : (
+                        <a
+                          key={att.url}
+                          href={att.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="message-attachments__file"
+                        >
+                          {att.name}
+                        </a>
+                      ),
+                    )}
+                  </div>
+                ) : null}
                 {tokenUsage ? <TokenUsageLine usage={tokenUsage} /> : null}
                 {handoff ? (
                   <HandoffLine
@@ -689,6 +1009,10 @@ export function ChatRoom({
                     style={{ borderColor: "var(--line)" }}
                   />
                 ) : null}
+                <MessageReactionChips
+                  groups={reactionGroups}
+                  onToggle={(emoji) => void toggleReaction(m.id, emoji)}
+                />
               </div>
             </article>
           );
@@ -728,6 +1052,27 @@ export function ChatRoom({
             ))}
           </div>
         ) : null}
+        {replyTo ? (
+          <div className="composer-reply-chip">
+            <div className="min-w-0">
+              <div className="composer-reply-chip__label">
+                Replying to {messageDisplayName(replyTo)}
+              </div>
+              <div className="composer-reply-chip__body">
+                {snippetBody(replyTo.body)}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="composer-reply-chip__cancel"
+              aria-label="Cancel reply"
+              title="Cancel reply"
+              onClick={() => setReplyTo(null)}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
         <ComposerChips
           agents={agents}
           connectors={connectors}
@@ -737,14 +1082,22 @@ export function ChatRoom({
         />
         <div className="composer-shell">
           <textarea
+            ref={composerRef}
             placeholder={
-              isDm
-                ? `Message ${dmPeer.name}`
-                : `Message #${channelName}. Use @ to mention agents or people.`
+              replyTo
+                ? `Reply to ${messageDisplayName(replyTo)}…`
+                : isDm
+                  ? `Message ${dmPeer.name}`
+                  : `Message #${channelName}. Use @ to mention agents or people.`
             }
             value={body}
             onChange={(e) => onChangeBody(e.target.value)}
             onKeyDown={(e) => {
+              if (e.key === "Escape" && replyTo) {
+                e.preventDefault();
+                setReplyTo(null);
+                return;
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 void sendMessage(e);
@@ -781,7 +1134,7 @@ export function ChatRoom({
               >
                 <MicIcon />
               </button>
-              {body.trim() ? (
+              {body.trim() || attachments.files.length ? (
                 <button
                   className="composer-icon-btn composer-icon-btn--send"
                   disabled={sending}

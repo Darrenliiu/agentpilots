@@ -1,10 +1,112 @@
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createXai } from "@ai-sdk/xai";
-import { stepCountIs, streamText, type ToolSet } from "ai";
-import type { Agent, AgentRunPhase } from "@/lib/types";
+import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
+import { createOpenAI, openai } from "@ai-sdk/openai";
+import { createXai, xai } from "@ai-sdk/xai";
+import {
+  stepCountIs,
+  streamText,
+  type FilePart,
+  type ImagePart,
+  type TextPart,
+  type ToolSet,
+  type UserContent,
+} from "ai";
+import {
+  fetchTextAttachmentContent,
+  isImageMime,
+  isPdfMime,
+  isTextMime,
+} from "@/lib/message-attachments";
+import type { Agent, AgentRunPhase, MessageAttachment } from "@/lib/types";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+const NATIVE_WEB_SEARCH_KEYS = new Set(["web_search", "google_search"]);
+
+/** Provider-executed web search tools (no Exa / MCP required). */
+export function getProviderWebSearchTools(provider: string): ToolSet {
+  switch (provider) {
+    case "openai":
+      return { web_search: openai.tools.webSearch({}) };
+    case "anthropic":
+      return { web_search: anthropic.tools.webSearch_20250305() };
+    case "google":
+      return { google_search: google.tools.googleSearch({}) };
+    case "xai":
+      return { web_search: xai.tools.webSearch({}) };
+    default:
+      return {};
+  }
+}
+
+function stripNativeWebSearchTools(tools: ToolSet | undefined): ToolSet {
+  if (!tools) return {};
+  const next: ToolSet = {};
+  for (const [key, value] of Object.entries(tools)) {
+    if (!NATIVE_WEB_SEARCH_KEYS.has(key)) next[key] = value;
+  }
+  return next;
+}
+
+function looksLikeWebSearchError(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /web[_\s-]?search|google[_\s-]?search|grounding|search tool/i.test(msg);
+}
+
+export async function buildUserContentFromAttachments(
+  prompt: string,
+  attachments: MessageAttachment[] | undefined,
+): Promise<{ content: UserContent; warnings: string[] }> {
+  const warnings: string[] = [];
+  const text = prompt.trim();
+  if (!attachments?.length) {
+    return { content: text || "(empty message)", warnings };
+  }
+
+  const parts: Array<TextPart | ImagePart | FilePart> = [];
+  if (text) parts.push({ type: "text", text });
+
+  for (const att of attachments) {
+    try {
+      if (isImageMime(att.mime)) {
+        parts.push({
+          type: "image",
+          image: new URL(att.url),
+          mediaType: att.mime,
+        });
+        continue;
+      }
+      if (isTextMime(att.mime)) {
+        const body = await fetchTextAttachmentContent(att);
+        parts.push({
+          type: "text",
+          text: `Attached file: ${att.name}\n\n${body}`,
+        });
+        continue;
+      }
+      if (isPdfMime(att.mime)) {
+        parts.push({
+          type: "file",
+          data: new URL(att.url),
+          mediaType: "application/pdf",
+          filename: att.name,
+        });
+        continue;
+      }
+      warnings.push(`Skipped unsupported attachment ${att.name}.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "read failed";
+      warnings.push(`${att.name}: ${msg}`);
+    }
+  }
+
+  if (!parts.length) {
+    return {
+      content: text || "(attachments could not be read)",
+      warnings,
+    };
+  }
+  return { content: parts, warnings };
+}
 
 export type AgentTokenUsage = {
   inputTokens: number | null;
@@ -43,6 +145,7 @@ export async function generateAgentTextReply(opts: {
   baseUrl?: string | null;
   systemPrompt: string;
   userPrompt: string;
+  attachments?: MessageAttachment[];
   history: { role: "user" | "assistant"; content: string }[];
   tools?: ToolSet;
   maxSteps?: number;
@@ -50,7 +153,12 @@ export async function generateAgentTextReply(opts: {
 }): Promise<{ text: string; warnings: string[]; usage: AgentTokenUsage | null }> {
   const model = getLanguageModel(opts.agent, opts.apiKey, opts.baseUrl);
   const warnings: string[] = [];
-  const hasTools = opts.tools && Object.keys(opts.tools).length > 0;
+  const { content: userContent, warnings: attachWarnings } =
+    await buildUserContentFromAttachments(opts.userPrompt, opts.attachments);
+  warnings.push(...attachWarnings);
+
+  let tools = opts.tools;
+  const hasTools = tools && Object.keys(tools).length > 0;
 
   if (hasTools && opts.agent.provider === "local") {
     warnings.push(
@@ -58,80 +166,116 @@ export async function generateAgentTextReply(opts: {
     );
   }
 
-  const useTools = hasTools && opts.agent.provider !== "local";
+  let useTools = Boolean(hasTools && opts.agent.provider !== "local");
   const onProgress = opts.onProgress;
 
   await onProgress?.({ phase: "thinking", statusText: "Thinking…" });
 
-  const result = streamText({
-    model,
-    system: opts.systemPrompt || `You are ${opts.agent.name}, a helpful community agent.`,
-    messages: [
-      ...opts.history.map((m) => ({ role: m.role, content: m.content })),
-      { role: "user" as const, content: opts.userPrompt },
-    ],
-    ...(useTools
-      ? {
-          tools: opts.tools,
-          stopWhen: stepCountIs(opts.maxSteps ?? 8),
+  const messages = [
+    ...opts.history.map((m) => ({ role: m.role, content: m.content })),
+    { role: "user" as const, content: userContent },
+  ];
+
+  async function runOnce(activeTools: ToolSet | undefined) {
+    const result = streamText({
+      model,
+      system:
+        opts.systemPrompt ||
+        `You are ${opts.agent.name}, a helpful community agent.`,
+      messages,
+      ...(activeTools && Object.keys(activeTools).length
+        ? {
+            tools: activeTools,
+            stopWhen: stepCountIs(opts.maxSteps ?? 8),
+          }
+        : {}),
+    });
+
+    let reasoningBuf = "";
+    let lastReasoningWrite = 0;
+    let sawText = false;
+
+    for await (const part of result.fullStream) {
+      if (part.type === "reasoning-delta") {
+        const chunk =
+          "text" in part && typeof part.text === "string"
+            ? part.text
+            : "delta" in part &&
+                typeof (part as { delta?: string }).delta === "string"
+              ? (part as { delta: string }).delta
+              : "";
+        if (!chunk) continue;
+        reasoningBuf += chunk;
+        const now = Date.now();
+        if (now - lastReasoningWrite >= REASONING_THROTTLE_MS) {
+          lastReasoningWrite = now;
+          await onProgress?.({
+            phase: "reasoning",
+            statusText: truncateStatus(reasoningBuf),
+          });
         }
-      : {}),
-  });
+        continue;
+      }
 
-  let reasoningBuf = "";
-  let lastReasoningWrite = 0;
-  let sawText = false;
-
-  for await (const part of result.fullStream) {
-    if (part.type === "reasoning-delta") {
-      const chunk =
-        "text" in part && typeof part.text === "string"
-          ? part.text
-          : "delta" in part && typeof (part as { delta?: string }).delta === "string"
-            ? (part as { delta: string }).delta
-            : "";
-      if (!chunk) continue;
-      reasoningBuf += chunk;
-      const now = Date.now();
-      if (now - lastReasoningWrite >= REASONING_THROTTLE_MS) {
-        lastReasoningWrite = now;
+      if (part.type === "tool-call" || part.type === "tool-input-start") {
+        const name =
+          "toolName" in part && typeof part.toolName === "string"
+            ? part.toolName
+            : "tool";
         await onProgress?.({
-          phase: "reasoning",
-          statusText: truncateStatus(reasoningBuf),
+          phase: "tool",
+          statusText: friendlyToolLabel(name),
+        });
+        continue;
+      }
+
+      if (part.type === "text-delta" && !sawText) {
+        sawText = true;
+        await onProgress?.({
+          phase: "generating",
+          statusText: "Generating reply",
         });
       }
-      continue;
     }
 
-    if (part.type === "tool-call" || part.type === "tool-input-start") {
-      const name =
-        "toolName" in part && typeof part.toolName === "string"
-          ? part.toolName
-          : "tool";
+    if (reasoningBuf && Date.now() - lastReasoningWrite >= 50) {
       await onProgress?.({
-        phase: "tool",
-        statusText: friendlyToolLabel(name),
-      });
-      continue;
-    }
-
-    if (part.type === "text-delta" && !sawText) {
-      sawText = true;
-      await onProgress?.({
-        phase: "generating",
-        statusText: "Generating reply",
+        phase: "reasoning",
+        statusText: truncateStatus(reasoningBuf),
       });
     }
+
+    const [text, usage] = await Promise.all([result.text, result.usage]);
+    return { text, usage };
   }
 
-  if (reasoningBuf && Date.now() - lastReasoningWrite >= 50) {
-    await onProgress?.({
-      phase: "reasoning",
-      statusText: truncateStatus(reasoningBuf),
-    });
-  }
+  let text: string;
+  let usage: Awaited<ReturnType<typeof runOnce>>["usage"];
 
-  const [text, usage] = await Promise.all([result.text, result.usage]);
+  try {
+    const once = await runOnce(useTools ? tools : undefined);
+    text = once.text;
+    usage = once.usage;
+  } catch (err) {
+    const hadNativeSearch =
+      useTools &&
+      tools &&
+      Object.keys(tools).some((k) => NATIVE_WEB_SEARCH_KEYS.has(k));
+    if (hadNativeSearch) {
+      warnings.push(
+        looksLikeWebSearchError(err)
+          ? "Native web search was unavailable for this model; replied without it."
+          : "Agent call failed with web search enabled; retried without native web search.",
+      );
+      tools = stripNativeWebSearchTools(tools);
+      useTools = Object.keys(tools).length > 0;
+      const once = await runOnce(useTools ? tools : undefined);
+      text = once.text;
+      usage = once.usage;
+    } else {
+      throw err;
+    }
+  }
 
   const inputTokens = usage.inputTokens ?? null;
   const outputTokens = usage.outputTokens ?? null;

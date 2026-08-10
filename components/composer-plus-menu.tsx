@@ -1,17 +1,80 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  MAX_MESSAGE_ATTACHMENTS,
+  isImageMime,
+  resolveAttachmentMime,
+  validateAttachmentFile,
+} from "@/lib/message-attachments";
 import type { Agent, CommunityConnector, Skill } from "@/lib/types";
+
+export type ComposerPendingFile = {
+  id: string;
+  file: File;
+  previewUrl?: string;
+};
 
 export type ComposerAttachment = {
   connectorIds: string[];
   skillIds: string[];
   imageAgentId: string | null;
+  webSearch: boolean;
+  files: ComposerPendingFile[];
+};
+
+export const DEFAULT_COMPOSER_ATTACHMENT: ComposerAttachment = {
+  connectorIds: [],
+  skillIds: [],
+  imageAgentId: null,
+  webSearch: true,
+  files: [],
 };
 
 type MenuView = "root" | "image" | "skills" | "connectors";
 
-function MenuIcon({ kind }: { kind: "image" | "skills" | "connectors" }) {
+function MenuIcon({
+  kind,
+}: {
+  kind: "files" | "image" | "skills" | "connectors" | "search";
+}) {
+  if (kind === "files") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M8 7V4h11v16H5V7h3z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          fill="none"
+        />
+        <path
+          d="M8 7h3V4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          fill="none"
+        />
+        <path
+          d="M9 12h6M9 16h4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (kind === "search") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="M16 16l4 4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
   if (kind === "image") {
     return (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -50,6 +113,12 @@ function MenuIcon({ kind }: { kind: "image" | "skills" | "connectors" }) {
   );
 }
 
+function revokePreviews(files: ComposerPendingFile[]) {
+  for (const f of files) {
+    if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
+  }
+}
+
 export function ComposerPlusMenu({
   agents,
   connectors,
@@ -70,6 +139,7 @@ export function ComposerPlusMenu({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<MenuView>("root");
   const rootRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const mediaAgents = agents.filter(
     (a) => a.status === "active" && (a.kind === "image" || a.kind === "video"),
@@ -113,8 +183,44 @@ export function ComposerPlusMenu({
     setView("root");
   }
 
+  function onPickFiles(list: FileList | null) {
+    if (!list?.length) return;
+    const incoming = Array.from(list);
+    const room = MAX_MESSAGE_ATTACHMENTS - value.files.length;
+    if (room <= 0) {
+      alert(`You can attach up to ${MAX_MESSAGE_ATTACHMENTS} files`);
+      return;
+    }
+    const nextFiles = [...value.files];
+    for (const file of incoming.slice(0, room)) {
+      const validated = validateAttachmentFile(file);
+      if (!validated.ok) {
+        alert(validated.error);
+        continue;
+      }
+      const mime = resolveAttachmentMime(file);
+      nextFiles.push({
+        id: crypto.randomUUID(),
+        file,
+        previewUrl: isImageMime(mime) ? URL.createObjectURL(file) : undefined,
+      });
+    }
+    onChange({ ...value, files: nextFiles });
+    setOpen(false);
+    setView("root");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   return (
     <div className="relative" ref={rootRef}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        multiple
+        accept="image/png,image/jpeg,image/webp,image/gif,text/plain,text/markdown,text/csv,application/json,.md,.csv,.txt,.json,application/pdf"
+        onChange={(e) => onPickFiles(e.target.files)}
+      />
       <button
         type="button"
         className="composer-plus-btn"
@@ -143,10 +249,20 @@ export function ComposerPlusMenu({
                 <button
                   type="button"
                   className="nav-hover flex w-full items-center gap-2 px-3 py-2 text-left"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <MenuIcon kind="files" />
+                  <span className="flex-1">Add files or photos</span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className="nav-hover flex w-full items-center gap-2 px-3 py-2 text-left"
                   onClick={() => setView("image")}
                 >
                   <MenuIcon kind="image" />
-                  <span className="flex-1">Image</span>
+                  <span className="flex-1">Generate with…</span>
                   <span className="muted">›</span>
                 </button>
               </li>
@@ -170,6 +286,29 @@ export function ComposerPlusMenu({
                   <MenuIcon kind="connectors" />
                   <span className="flex-1">Connectors</span>
                   <span className="muted">›</span>
+                </button>
+              </li>
+              <li>
+                <div
+                  className="my-1 border-t"
+                  style={{ borderColor: "var(--line)" }}
+                />
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className="nav-hover flex w-full items-center gap-2 px-3 py-2 text-left"
+                  onClick={() =>
+                    onChange({ ...value, webSearch: !value.webSearch })
+                  }
+                >
+                  <MenuIcon kind="search" />
+                  <span className="flex-1">Web search</span>
+                  {value.webSearch ? (
+                    <span aria-label="Enabled" style={{ color: "var(--accent)" }}>
+                      ✓
+                    </span>
+                  ) : null}
                 </button>
               </li>
             </ul>
@@ -315,11 +454,19 @@ export function ComposerChips({
 }) {
   const chips: { key: string; label: string; onRemove: () => void }[] = [];
 
+  if (!value.webSearch) {
+    chips.push({
+      key: "web-search-off",
+      label: "Web search off",
+      onRemove: () => onChange({ ...value, webSearch: true }),
+    });
+  }
+
   if (value.imageAgentId) {
     const agent = agents.find((a) => a.id === value.imageAgentId);
     chips.push({
       key: `img-${value.imageAgentId}`,
-      label: agent ? `Image: ${agent.name}` : "Image agent",
+      label: agent ? `Generate: ${agent.name}` : "Image agent",
       onRemove: () => onChange({ ...value, imageAgentId: null }),
     });
   }
@@ -350,25 +497,77 @@ export function ComposerChips({
     });
   }
 
-  if (!chips.length) return null;
+  const hasFiles = value.files.length > 0;
+  if (!chips.length && !hasFiles) return null;
 
   return (
-    <div className="mb-2 flex flex-wrap gap-2">
-      {chips.map((chip) => (
-        <button
-          key={chip.key}
-          type="button"
-          className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs"
-          style={{ borderColor: "var(--line)" }}
-          onClick={chip.onRemove}
-          title="Remove"
-        >
-          {chip.label}
-          <span className="muted" aria-hidden>
-            ×
-          </span>
-        </button>
-      ))}
+    <div className="mb-2 space-y-2">
+      {hasFiles ? (
+        <div className="flex flex-wrap gap-2">
+          {value.files.map((f) => (
+            <div
+              key={f.id}
+              className="composer-file-chip"
+              title={f.file.name}
+            >
+              {f.previewUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={f.previewUrl} alt="" className="composer-file-chip__thumb" />
+              ) : (
+                <span className="composer-file-chip__icon" aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M8 4h7l5 5v11a2 2 0 01-2 2H8a2 2 0 01-2-2V6a2 2 0 012-2z"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    />
+                    <path d="M15 4v5h5" stroke="currentColor" strokeWidth="1.5" />
+                  </svg>
+                </span>
+              )}
+              <span className="composer-file-chip__name">{f.file.name}</span>
+              <button
+                type="button"
+                className="composer-file-chip__remove"
+                aria-label={`Remove ${f.file.name}`}
+                onClick={() => {
+                  if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
+                  onChange({
+                    ...value,
+                    files: value.files.filter((x) => x.id !== f.id),
+                  });
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {chips.length ? (
+        <div className="flex flex-wrap gap-2">
+          {chips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs"
+              style={{ borderColor: "var(--line)" }}
+              onClick={chip.onRemove}
+              title="Remove"
+            >
+              {chip.label}
+              <span className="muted" aria-hidden>
+                ×
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+export function clearComposerAttachmentFiles(value: ComposerAttachment) {
+  revokePreviews(value.files);
+  return { ...value, files: [] as ComposerPendingFile[] };
 }

@@ -17,12 +17,50 @@ import type {
   CommunityRole,
 } from "@/lib/types";
 
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  oauth_discovery:
+    "Could not discover OAuth endpoints for this connector. Paste an API token below, or try again later.",
+  oauth_client:
+    "No OAuth client could be registered for this connector. Set MCP_OAUTH_CLIENT_ID for this app, or paste an API token.",
+  oauth_unavailable: "OAuth is not available for this connector.",
+  oauth_session: "OAuth session expired. Click Connect with OAuth again.",
+  oauth_encryption:
+    "Server encryption is not configured (AGENTPILOTS_ENCRYPTION_KEY).",
+  token_exchange:
+    "OAuth token exchange failed. Try again, or paste an API token instead.",
+  access_denied: "OAuth access was denied.",
+};
+
+function oauthNoticeFromSearch(searchParams: {
+  connected?: string;
+  error?: string;
+}): { kind: "success" | "error"; message: string } | null {
+  if (searchParams.connected === "1") {
+    return {
+      kind: "success",
+      message: "Connector connected successfully.",
+    };
+  }
+  if (searchParams.error) {
+    return {
+      kind: "error",
+      message:
+        OAUTH_ERROR_MESSAGES[searchParams.error] ||
+        `OAuth connection failed: ${searchParams.error}`,
+    };
+  }
+  return null;
+}
+
 export default async function ConnectorsSettingsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ communitySlug: string }>;
+  searchParams: Promise<{ connected?: string; error?: string }>;
 }) {
   const { communitySlug } = await params;
+  const query = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -91,6 +129,7 @@ export default async function ConnectorsSettingsPage({
           connectors={(connectors || []) as CommunityConnector[]}
           connectedIds={connectedIds}
           sharedIds={sharedIds}
+          oauthNotice={oauthNoticeFromSearch(query)}
           enableCatalogAction={enableCatalogConnectorAction}
           addCustomAction={addCustomConnectorAction}
           toggleAction={toggleCommunityConnectorAction}

@@ -1,9 +1,10 @@
 import type { ToolSet } from "ai";
-import { decryptSecret } from "@/lib/agents/encrypt";
+import { decryptSecret, encryptSecret } from "@/lib/agents/encrypt";
 import {
   extractMentionedAgentIds,
   generateAgentMediaReply,
   generateAgentTextReply,
+  getProviderWebSearchTools,
   stripAgentMentions,
 } from "@/lib/agents/providers";
 import {
@@ -11,6 +12,11 @@ import {
   namespaceTools,
   openConnectorMcpClient,
 } from "@/lib/connectors/mcp-client";
+import {
+  discoverOAuthMetadata,
+  mcpClientMetadataUrl,
+  refreshAccessToken,
+} from "@/lib/connectors/oauth";
 import { ensureLocalModelActive } from "@/lib/local-llm";
 import { formatSkillsForSystemPrompt } from "@/lib/skills/parse";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -21,6 +27,7 @@ import type {
   CommunityConnector,
   HandoffMetadata,
   Message,
+  MessageAttachment,
   Skill,
 } from "@/lib/types";
 
@@ -29,6 +36,8 @@ type MessageMeta = {
   connector_ids?: string[];
   skill_ids?: string[];
   image_agent_id?: string;
+  web_search?: boolean;
+  attachments?: MessageAttachment[];
   handoff?: HandoffMetadata;
 };
 
@@ -135,7 +144,12 @@ async function runTargetAgents(opts: {
           process.env.LOCAL_LLM_BASE_URL ||
           "http://127.0.0.1:11435/v1"
         : secret?.base_url;
-      const prompt = stripAgentMentions(message.body, agent) || message.body;
+      const prompt =
+        stripAgentMentions(message.body, agent) ||
+        message.body ||
+        (Array.isArray(meta.attachments) && meta.attachments.length
+          ? "Please review the attached files."
+          : "");
 
       let body: string;
       let metadata: Record<string, unknown> = {
@@ -158,7 +172,7 @@ async function runTargetAgents(opts: {
           await ensureLocalModelActive(agent.model || "qwen2.5-1.5b-instruct");
         }
 
-        const { tools, warnings: toolWarnings, skillBlock } =
+        const { tools: mcpTools, warnings: toolWarnings, skillBlock } =
           await resolveToolsAndSkills({
             admin,
             agent,
@@ -167,6 +181,12 @@ async function runTargetAgents(opts: {
             meta,
             closers,
           });
+
+        const webSearchEnabled = meta.web_search !== false;
+        const nativeSearch = webSearchEnabled
+          ? getProviderWebSearchTools(agent.provider)
+          : {};
+        const tools: ToolSet = { ...mcpTools, ...nativeSearch };
 
         const systemParts = [
           agent.system_prompt ||
@@ -195,12 +215,17 @@ async function runTargetAgents(opts: {
           systemParts.push("## Attached skills\n\n" + skillBlock);
         }
 
+        const attachments = Array.isArray(meta.attachments)
+          ? meta.attachments
+          : undefined;
+
         const result = await generateAgentTextReply({
           agent,
           apiKey,
           baseUrl,
           systemPrompt: systemParts.join("\n\n"),
           userPrompt: prompt,
+          attachments,
           history,
           tools: Object.keys(tools).length ? tools : undefined,
           onProgress: publishProgress,
@@ -613,7 +638,14 @@ async function resolveConnectorCredential(
       .eq("status", "connected")
       .maybeSingle();
     if (personal?.encrypted_access_token) {
-      const token = decryptConnectorToken(personal.encrypted_access_token);
+      const refreshed = await maybeRefreshConnectorTokens(
+        admin,
+        connector,
+        personal,
+      );
+      const token = decryptConnectorToken(
+        refreshed?.encrypted_access_token || personal.encrypted_access_token,
+      );
       if (token) return { ok: true, accessToken: token };
     }
   }
@@ -636,6 +668,97 @@ async function resolveConnectorCredential(
     ok: false,
     reason: "not connected (connect in community Connectors settings)",
   };
+}
+
+function tokenNeedsRefresh(expiresAt: string | null | undefined): boolean {
+  if (!expiresAt) return false;
+  const ms = Date.parse(expiresAt);
+  if (Number.isNaN(ms)) return false;
+  // Refresh 2 minutes before expiry.
+  return ms <= Date.now() + 2 * 60 * 1000;
+}
+
+async function maybeRefreshConnectorTokens(
+  admin: AdminClient,
+  connector: CommunityConnector,
+  account: {
+    id: string;
+    encrypted_access_token?: string | null;
+    encrypted_refresh_token?: string | null;
+    token_expires_at?: string | null;
+    oauth_client_id?: string | null;
+    encrypted_oauth_client_secret?: string | null;
+    oauth_token_endpoint?: string | null;
+    oauth_resource?: string | null;
+  },
+): Promise<{ encrypted_access_token: string } | null> {
+  if (connector.auth_type !== "oauth") return null;
+  if (!tokenNeedsRefresh(account.token_expires_at)) return null;
+  const refreshToken = decryptConnectorToken(account.encrypted_refresh_token);
+  if (!refreshToken) return null;
+
+  let tokenEndpoint = account.oauth_token_endpoint || null;
+  let resource = account.oauth_resource || null;
+  if (!tokenEndpoint || !resource) {
+    const meta = await discoverOAuthMetadata(connector.mcp_url);
+    if (!meta) return null;
+    tokenEndpoint = tokenEndpoint || meta.token_endpoint;
+    resource = resource || meta.resource;
+  }
+
+  const slugKey = connector.slug.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  const clientId =
+    account.oauth_client_id ||
+    process.env[`MCP_OAUTH_CLIENT_ID_${slugKey}`] ||
+    process.env.MCP_OAUTH_CLIENT_ID ||
+    (process.env.NEXT_PUBLIC_SITE_URL
+      ? mcpClientMetadataUrl(process.env.NEXT_PUBLIC_SITE_URL)
+      : null);
+  if (!clientId || !tokenEndpoint) return null;
+
+  let clientSecret: string | undefined;
+  if (account.encrypted_oauth_client_secret) {
+    try {
+      clientSecret = decryptSecret(account.encrypted_oauth_client_secret);
+    } catch {
+      clientSecret = undefined;
+    }
+  } else {
+    clientSecret =
+      process.env[`MCP_OAUTH_CLIENT_SECRET_${slugKey}`] ||
+      process.env.MCP_OAUTH_CLIENT_SECRET ||
+      undefined;
+  }
+
+  const tokens = await refreshAccessToken({
+    tokenEndpoint,
+    refreshToken,
+    clientId,
+    clientSecret,
+    resource: resource || undefined,
+  });
+  if (!tokens) return null;
+
+  const payload = {
+    encrypted_access_token: encryptSecret(tokens.access_token),
+    encrypted_refresh_token: tokens.refresh_token
+      ? encryptSecret(tokens.refresh_token)
+      : account.encrypted_refresh_token,
+    token_expires_at: tokens.expires_in
+      ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+      : account.token_expires_at,
+    oauth_token_endpoint: tokenEndpoint,
+    oauth_resource: resource,
+    oauth_client_id: clientId,
+    error: null,
+  };
+
+  await admin
+    .from("user_connector_accounts")
+    .update(payload)
+    .eq("id", account.id);
+
+  return { encrypted_access_token: payload.encrypted_access_token };
 }
 
 export type { Message };

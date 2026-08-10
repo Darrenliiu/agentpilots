@@ -6,6 +6,7 @@ import type {
   CommunityConnector,
   CommunityRole,
   Message,
+  MessageReaction,
   Profile,
   Skill,
 } from "@/lib/types";
@@ -110,8 +111,19 @@ export default async function ChannelPage({
     agent: Agent | null;
   })[]).map((m) => ({
     ...m,
+    parent_id: m.parent_id ?? null,
     metadata: (m.metadata || {}) as Record<string, unknown>,
   }));
+
+  const messageIds = initialMessages.map((m) => m.id);
+  let initialReactions: MessageReaction[] = [];
+  if (messageIds.length) {
+    const { data: reactionRows } = await supabase
+      .from("message_reactions")
+      .select("*")
+      .in("message_id", messageIds);
+    initialReactions = (reactionRows || []) as MessageReaction[];
+  }
 
   const { data: connectors } = await supabase
     .from("community_connectors")
@@ -164,6 +176,7 @@ export default async function ChannelPage({
       communityId={community.id}
       communitySlug={community.slug}
       initialMessages={initialMessages}
+      initialReactions={initialReactions}
       agents={agents}
       communityAgents={communityAgents}
       members={members}

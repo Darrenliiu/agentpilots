@@ -14,11 +14,21 @@ export type HandoffMetadata = {
   chain_agent_ids: string[];
 };
 
+export type MessageAttachment = {
+  url: string;
+  name: string;
+  mime: string;
+  size: number;
+};
+
 export type MessageComposerMetadata = {
   mentioned_agent_ids?: string[];
   connector_ids?: string[];
   skill_ids?: string[];
   image_agent_id?: string;
+  /** When false, skip provider-native web search for this message. Default true. */
+  web_search?: boolean;
+  attachments?: MessageAttachment[];
   handoff?: HandoffMetadata;
 };
 
@@ -57,12 +67,21 @@ export type Message = {
   channel_id: string;
   author_id: string | null;
   agent_id: string | null;
+  parent_id: string | null;
   body: string;
   metadata: Record<string, unknown>;
   client_message_id: string | null;
   created_at: string;
   author?: Profile | null;
   agent?: Agent | null;
+};
+
+export type MessageReaction = {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: string;
 };
 
 export type Agent = {
@@ -161,6 +180,9 @@ export type UserConnectorAccount = {
   status: ConnectorAccountStatus;
   error: string | null;
   token_expires_at: string | null;
+  oauth_client_id?: string | null;
+  oauth_token_endpoint?: string | null;
+  oauth_resource?: string | null;
   created_at: string;
 };
 
