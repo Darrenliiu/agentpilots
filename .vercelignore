@@ -1,0 +1,12 @@
+# Keep CLI deploys lean (Git deploys already respect .gitignore)
+node_modules
+.next
+desktop/dist
+desktop/resources/llama
+desktop/resources/models
+*.gguf
+*.zip
+.local-llm-status.json
+.git
+.env.local
+.env*.local
